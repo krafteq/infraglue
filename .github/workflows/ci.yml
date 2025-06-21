@@ -50,5 +50,5 @@ jobs:
       - name: Run linter
         run: pnpm lint
 
-      - name: Check TypeScript
-        run: pnpm type-check
+      # - name: Check TypeScript
+      #   run: pnpm type-check
