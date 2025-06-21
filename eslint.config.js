@@ -38,9 +38,13 @@ export default defineConfig([
   {
     files: ['**/*.md'],
     plugins: { markdown },
-    language: 'markdown/md',
+    language: 'markdown/commonmark',
     extends: ['markdown/recommended'],
   },
-  { plugins: { prettier }, rules: { 'prettier/prettier': 'error' } },
+  {
+    files: ['**/*.{js,ts,tsx,json,jsonc,json5}'],
+    plugins: { prettier },
+    rules: { 'prettier/prettier': 'error' },
+  },
   { ignores: ['node_modules', 'eslint.config.mjs', '**/dist', 'config/*'] },
 ])

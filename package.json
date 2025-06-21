@@ -23,7 +23,7 @@
     "node": ">= 22.10.0"
   },
   "lint-staged": {
-    "**/*.{js,ts,tsx}": [
+    "**/*.{js,ts,tsx,json,jsonc,json5,md}": [
       "eslint --fix"
     ],
     "**/*": "prettier --write --ignore-unknown"
