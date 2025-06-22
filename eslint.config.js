@@ -4,7 +4,6 @@ import tseslint from 'typescript-eslint'
 import json from '@eslint/json'
 import markdown from '@eslint/markdown'
 import { defineConfig } from 'eslint/config'
-import prettier from 'eslint-plugin-prettier'
 
 export default defineConfig([
   {
@@ -40,11 +39,7 @@ export default defineConfig([
     plugins: { markdown },
     language: 'markdown/commonmark',
     extends: ['markdown/recommended'],
-  },
-  {
-    files: ['**/*.{js,ts,tsx,json,jsonc,json5}'],
-    plugins: { prettier },
-    rules: { 'prettier/prettier': 'error' },
+    ignores: ['**/.terraform/**'],
   },
   { ignores: ['node_modules', 'eslint.config.mjs', '**/dist', 'config/*'] },
 ])

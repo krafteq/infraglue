@@ -1,0 +1,8 @@
+# could be recursive
+# workspaces:
+#  - "./*"
+
+provider: terraform
+
+injection:
+  network_name: '../docker-network:network_name'

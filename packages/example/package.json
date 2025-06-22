@@ -1,0 +1,14 @@
+{
+  "name": "example",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "show": "platform show ../../examples/terraform_only/ --json",
+    "plan": "platform plan ../../examples/terraform_only/"
+  },
+  "dependencies": {
+    "@platform-tools/platform-cli": "workspace:*",
+    "@platform-tools/provider-terraform": "workspace:*"
+  },
+  "packageManager": "pnpm@10.12.1"
+}

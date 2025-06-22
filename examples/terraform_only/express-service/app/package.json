@@ -1,0 +1,25 @@
+{
+  "name": "express-app",
+  "version": "1.0.0",
+  "description": "Simple Express.js application with PostgreSQL",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "pg": "^8.11.3",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "express",
+    "postgresql",
+    "docker"
+  ],
+  "author": "Terraform Example",
+  "license": "MIT"
+}

@@ -1,0 +1,14 @@
+provider: platform
+
+workspace:
+  - './*'
+
+defaults:
+  provider: terraform
+
+output:
+  postgres_host: './postgres:database_host'
+
+# TODO: explicit providers, default providers are implicit @platform-tools/provider-$provider
+providers_map:
+  whataber: '@3rd-party/provider-whatever'
