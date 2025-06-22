@@ -49,8 +49,29 @@ export class TerraformProvider extends Provider {
             throw error;
         }
     }
-    async apply() {
-        throw new Error('Not implemented');
+    async apply(configuration, input) {
+        try {
+            await this.checkTerraformInstallation();
+            await this.initializeTerraform(configuration);
+            const variables = Object.entries(input)
+                .map(([key, value]) => `-var "${key}=${value}"`)
+                .join(' ');
+            await execAsync(`terraform apply --auto-approve --json ${variables}`, {
+                cwd: configuration.rootPath,
+            });
+            const { stdout: outputStdout } = await execAsync(`terraform output --json`, {
+                cwd: configuration.rootPath,
+            });
+            const outputs = JSON.parse(outputStdout);
+            return Object.fromEntries(Object.entries(outputs).map(([key, value]) => [key, value.value]));
+        }
+        catch (error) {
+            if (error instanceof Error) {
+                const err = error;
+                throw new Error(`Terraform apply failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}`);
+            }
+            throw error;
+        }
     }
     async checkTerraformInstallation() {
         try {

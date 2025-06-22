@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "show": "platform show ../../examples/terraform_only/ --json",
-    "plan": "platform plan ../../examples/terraform_only/"
+    "plan": "platform plan ../../examples/terraform_only/",
+    "apply": "platform apply ../../examples/terraform_only/"
   },
   "dependencies": {
     "@platform-tools/platform-cli": "workspace:*",

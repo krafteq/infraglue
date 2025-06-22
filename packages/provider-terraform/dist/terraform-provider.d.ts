@@ -9,7 +9,7 @@ export declare class TerraformProvider extends Provider {
     constructor();
     getProviderName(): string;
     getPlan(configuration: PlatformDetectionResult, input: ProviderInput): Promise<ProviderPlan>;
-    apply(): Promise<ProviderOutput>;
+    apply(configuration: PlatformDetectionResult, input: ProviderInput): Promise<ProviderOutput>;
     private checkTerraformInstallation;
     private initializeTerraform;
 }

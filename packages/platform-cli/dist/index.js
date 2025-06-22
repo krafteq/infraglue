@@ -23,6 +23,22 @@ program
     console.log(JSON.stringify(plan.output, null, 2));
 });
 program
+    .command('apply')
+    .description('Apply the platform configuration for a directory')
+    .argument('[directory]', 'Directory to apply (defaults to current directory)', '.')
+    .action(async (directory) => {
+    const resolvedPath = resolve(directory);
+    console.log(`Applying platform configuration in: ${resolvedPath}`);
+    const result = await getPlatformConfiguration(resolvedPath);
+    if (!result) {
+        console.log('No platform configuration found');
+        return;
+    }
+    const provider = await getProvider(result, process.cwd());
+    const outputs = await provider.apply(result, {});
+    console.log(JSON.stringify(outputs, null, 2));
+});
+program
     .command('show')
     .description('Parse and show platform configuration for a directory')
     .argument('[directory]', 'Directory to analyze (defaults to current directory)', '.')

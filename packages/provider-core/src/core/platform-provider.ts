@@ -75,8 +75,43 @@ export class PlatformProvider extends Provider {
     return result
   }
 
-  override async apply(): Promise<ProviderOutput> {
-    // TODO: implement
-    return {}
+  override async apply(
+    configuration: PlatformDetectionResult,
+    input: ProviderInput,
+    rootPath?: string,
+  ): Promise<ProviderOutput> {
+    const outputsCache = new Map<string, ProviderOutput>()
+    const resolvedRootPath = rootPath ?? configuration.rootPath
+
+    for (const workspaceKey in configuration.workspaces) {
+      const workspace = configuration.workspaces[workspaceKey]
+      const inputs: ProviderInput = {}
+      for (const injectionKey in workspace.injections) {
+        const injection = workspace.injections[injectionKey]
+        const valueToInject = injection.workspace
+          ? outputsCache.get(injection.workspace)?.[injection.key]
+          : input[injection.key]
+        if (valueToInject === undefined) {
+          throw new Error(`Value to inject ${injection.key} from workspace ${injection.workspace} is not found`)
+        }
+        inputs[injection.key] = valueToInject
+      }
+      const provider = await getProvider(workspace, resolvedRootPath)
+      const outputs =
+        provider instanceof PlatformProvider
+          ? await provider.apply(workspace, inputs, resolvedRootPath)
+          : await provider.apply(workspace, inputs)
+      outputsCache.set(workspaceKey, outputs)
+    }
+    const result: ProviderOutput = {}
+    for (const outputKey in configuration.output) {
+      const output = configuration.output[outputKey]
+      const valueToOutput = output.workspace ? outputsCache.get(output.workspace)?.[output.key] : input[output.key]
+      if (valueToOutput === undefined) {
+        throw new Error(`Value to output ${output.key} from workspace ${output.workspace} is not found`)
+      }
+      result[outputKey] = valueToOutput
+    }
+    return result
   }
 }

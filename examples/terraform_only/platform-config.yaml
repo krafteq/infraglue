@@ -8,7 +8,7 @@ defaults:
 
 output:
   postgres_host: './postgres:database_host'
-
+  app_url: './express-service:app_url'
 # TODO: explicit providers, default providers are implicit @platform-tools/provider-$provider
-providers_map:
-  whataber: '@3rd-party/provider-whatever'
+# providers_map:
+#   whataber: '@3rd-party/provider-whatever'

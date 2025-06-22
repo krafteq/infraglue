@@ -6,7 +6,8 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+# should be npm ci --only=production, but it is ok for such example
+RUN npm i
 
 # Copy application code
 COPY . .

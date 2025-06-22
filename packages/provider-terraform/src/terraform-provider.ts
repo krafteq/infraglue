@@ -12,7 +12,7 @@ interface ProviderPlan {
   output: ProviderOutput
 }
 
-type TerraformOutput =
+type TerraformPlanOutput =
   | {
       type: 'planned_change'
       change: {
@@ -25,6 +25,8 @@ type TerraformOutput =
       outputs: Record<string, { action: 'create' } | { value: string }>
     }
   | Record<string, unknown>
+
+type TerraformOutputOutput = Record<string, { value: string }>
 
 export class TerraformProvider extends Provider {
   constructor() {
@@ -49,7 +51,7 @@ export class TerraformProvider extends Provider {
         cwd: configuration.rootPath,
       })
 
-      const parsedResults = JSON.parse(`[${stdout.trimEnd().replace(/\n/g, ',')}]`) as TerraformOutput[]
+      const parsedResults = JSON.parse(`[${stdout.trimEnd().replace(/\n/g, ',')}]`) as TerraformPlanOutput[]
       const outputs = parsedResults.filter((result) => result.type === 'outputs')
 
       // TODO: fix the types
@@ -84,8 +86,36 @@ export class TerraformProvider extends Provider {
     }
   }
 
-  async apply(): Promise<ProviderOutput> {
-    throw new Error('Not implemented')
+  async apply(configuration: PlatformDetectionResult, input: ProviderInput): Promise<ProviderOutput> {
+    try {
+      await this.checkTerraformInstallation()
+
+      await this.initializeTerraform(configuration)
+
+      const variables = Object.entries(input)
+        .map(([key, value]) => `-var "${key}=${value}"`)
+        .join(' ')
+
+      await execAsync(`terraform apply --auto-approve --json ${variables}`, {
+        cwd: configuration.rootPath,
+      })
+
+      const { stdout: outputStdout } = await execAsync(`terraform output --json`, {
+        cwd: configuration.rootPath,
+      })
+
+      const outputs = JSON.parse(outputStdout) as TerraformOutputOutput
+
+      return Object.fromEntries(Object.entries(outputs).map(([key, value]) => [key, value.value]))
+    } catch (error) {
+      if (error instanceof Error) {
+        const err = error as Error & { code?: number; stderr?: string }
+        throw new Error(
+          `Terraform apply failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}`,
+        )
+      }
+      throw error
+    }
   }
 
   private async checkTerraformInstallation(): Promise<void> {
