@@ -1,0 +1,21 @@
+name: docker-network
+runtime: nodejs
+description: Docker network Pulumi project
+
+# Secret provider configuration
+# You can set this to use different secret providers:
+# - passphrase (default, uses PULUMI_CONFIG_PASSPHRASE env var)
+# - awskms
+# - azurekeyvault
+# - gcpkms
+# - hashivault
+# - cloudflare
+# - or leave empty to use Pulumi Cloud
+secretsprovider: passphrase
+
+backend:
+  url: file://./.pulumi
+  # Alternative backends:
+  # url: https://app.pulumi.com
+  # url: https://pulumi.yourcompany.com
+  # url: s3://my-bucket/pulumi

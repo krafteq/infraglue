@@ -9,6 +9,7 @@ defaults:
 output:
   postgres_host: './postgres:database_host'
   app_url: './express-service:app_url'
+  network_name: './docker-network:name'
 # TODO: explicit providers, default providers are implicit @infra-glue/provider-$provider
 # providers_map:
 #   whataber: '@3rd-party/provider-whatever'
