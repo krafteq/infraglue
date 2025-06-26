@@ -1,5 +1,5 @@
 {
-  "name": "@platform-tools/provider-core",
+  "name": "@infra-glue/provider-core",
   "version": "1.0.0",
   "description": "Core provider classes and namespaces for platform tools",
   "type": "module",
@@ -26,9 +26,10 @@
     "lint:fix": "eslint src --ext .ts --fix"
   },
   "keywords": [
-    "platform-tools",
+    "infra-glue",
     "provider",
     "core",
+    "iac",
     "typescript"
   ],
   "author": "",

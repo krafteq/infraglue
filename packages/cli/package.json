@@ -1,11 +1,11 @@
 {
-  "name": "@platform-tools/platform-cli",
+  "name": "@infra-glue/cli",
   "version": "1.0.0",
-  "description": "CLI tool for platform-tools",
+  "description": "CLI tool for infra-glue",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "platform": "dist/index.js"
+    "ig": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -15,14 +15,15 @@
   },
   "keywords": [
     "cli",
-    "platform",
-    "tools"
+    "iac",
+    "tools",
+    "infra-glue"
   ],
   "author": "",
   "license": "MIT",
   "packageManager": "pnpm@10.12.1",
   "dependencies": {
-    "@platform-tools/provider-core": "workspace:*",
+    "@infra-glue/provider-core": "workspace:*",
     "commander": "^12.0.0",
     "tsx": "^4.20.3"
   },

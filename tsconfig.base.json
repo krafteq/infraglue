@@ -27,7 +27,7 @@
   },
   "exclude": ["node_modules", "dist", "build", "**/*.test.ts", "**/*.test.js", "**/*.spec.ts", "**/*.spec.js"],
   "paths": {
-    "@platform-tools/provider-core": ["./packages/provider-core/src"],
-    "@platform-tools/platform-cli": ["./packages/platform-cli/src"]
+    "@infra-glue/provider-core": ["./packages/provider-core/src"],
+    "@infra-glue/cli": ["./packages/cli/src"]
   }
 }

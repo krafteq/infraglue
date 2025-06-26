@@ -1,6 +1,6 @@
-# Contributing to Platform Tools
+# Contributing to Infra Glue
 
-Thank you for your interest in contributing to Platform Tools! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Infra Glue! This document provides guidelines and information for contributors.
 
 ## Table of Contents
 
@@ -24,20 +24,18 @@ Before you begin contributing, please ensure you have:
 1. **Fork and clone the repository**
 
    ```bash
-   git clone https://github.com/your-username/platform-tools.git
-   cd platform-tools
+   git clone https://github.com/your-username/infra-glue.git
+   cd infra-glue
    ```
 
 2. **Install dependencies**
 
-   ```bash
+   ````bash
    pnpm install
-   ```
-
-3. **Set up Git hooks**
+   ```3. **Set up Git hooks**
    ```bash
    pnpm prepare
-   ```
+   ````
 
 ## Code Style
 
@@ -154,4 +152,4 @@ By contributing to this project, you agree that your contributions will be licen
 
 If you have any questions about contributing, please open an issue or reach out to the maintainers.
 
-Thank you for contributing to Platform Tools! 🚀
+Thank you for contributing to Infra Glue! 🚀

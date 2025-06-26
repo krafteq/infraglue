@@ -1,6 +1,6 @@
 {
   "type": "module",
-  "name": "platform-tools",
+  "name": "infra-glue",
   "version": "1.0.0",
   "description": "",
   "scripts": {

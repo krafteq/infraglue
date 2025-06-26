@@ -1,6 +1,6 @@
-# Platform Tools
+# Infra Glue
 
-A collection of platform tools and utilities.
+A collection of infrastructure glue tools and utilities.
 
 ## Contributing
 

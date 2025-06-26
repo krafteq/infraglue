@@ -1,15 +1,11 @@
 /**
- * Platform Detector
+ * PlatformDetector class for detecting and managing platform configurations.
  *
- * Detects and analyzes platform-config.yaml files to understand workspace structure
- * and dependencies between different platform components.
- *
- * Example usage:
- * ```typescript
- * import { PlatformDetector } from '@platform-tools/provider-core'
+ * @example
+ * import { PlatformDetector } from '@infra-glue/provider-core'
  *
  * const detector = new PlatformDetector()
- * const result = await detector.detectPlatforms('./examples/terraform_only')
+ * const result = await detector.detectPlatform('/path/to/project')
  *
  * console.log('Workspaces found:', result.workspaces.size)
  * console.log('Execution order:', detector.getExecutionOrder(result.workspaces))
@@ -19,7 +15,6 @@
  * if (errors.length > 0) {
  *   console.error('Configuration errors:', errors)
  * }
- * ```
  */
 
 // TODO: it is probably should be moved to a separate package

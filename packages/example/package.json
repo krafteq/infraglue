@@ -3,13 +3,13 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "show": "platform show ../../examples/terraform_only/ --json",
-    "plan": "platform plan ../../examples/terraform_only/",
-    "apply": "platform apply ../../examples/terraform_only/"
+    "show": "ig show ../../examples/terraform_only/ --json",
+    "plan": "ig plan ../../examples/terraform_only/",
+    "apply": "ig apply ../../examples/terraform_only/"
   },
   "dependencies": {
-    "@platform-tools/platform-cli": "workspace:*",
-    "@platform-tools/provider-terraform": "workspace:*"
+    "@infra-glue/cli": "workspace:*",
+    "@infra-glue/provider-terraform": "workspace:*"
   },
   "packageManager": "pnpm@10.12.1"
 }

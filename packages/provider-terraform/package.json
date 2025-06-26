@@ -1,5 +1,5 @@
 {
-  "name": "@platform-tools/provider-terraform",
+  "name": "@infra-glue/provider-terraform",
   "version": "1.0.0",
   "description": "Terraform provider implementation for platform tools",
   "type": "module",
@@ -26,16 +26,18 @@
     "lint:fix": "eslint src --ext .ts --fix"
   },
   "keywords": [
-    "platform-tools",
-    "provider",
     "terraform",
-    "typescript"
+    "provider",
+    "infrastructure",
+    "infra-glue",
+    "platform-tools",
+    "iac"
   ],
   "author": "",
   "license": "MIT",
   "packageManager": "pnpm@10.12.1",
   "dependencies": {
-    "@platform-tools/provider-core": "workspace:*"
+    "@infra-glue/provider-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

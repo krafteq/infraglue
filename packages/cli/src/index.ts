@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander'
-import { getPlatformConfiguration, getProvider, type PlatformDetectionResult } from '@platform-tools/provider-core'
+import { getPlatformConfiguration, getProvider, type PlatformDetectionResult } from '@infra-glue/provider-core'
 import { resolve } from 'path'
 
 const program = new Command()
 
-program.name('platform').description('CLI tool for platform-tools').version('1.0.0')
+program.name('platform').description('CLI tool for infra-glue').version('1.0.0')
 
 program
   .command('plan')

@@ -61,18 +61,9 @@ importers:
         specifier: ^8.34.1
         version: 8.34.1(eslint@9.29.0(jiti@2.4.2))(typescript@5.8.3)
 
-  packages/example:
+  packages/cli:
     dependencies:
-      '@platform-tools/platform-cli':
-        specifier: workspace:*
-        version: link:../platform-cli
-      '@platform-tools/provider-terraform':
-        specifier: workspace:*
-        version: link:../provider-terraform
-
-  packages/platform-cli:
-    dependencies:
-      '@platform-tools/provider-core':
+      '@infra-glue/provider-core':
         specifier: workspace:*
         version: link:../provider-core
       commander:
@@ -91,6 +82,15 @@ importers:
       typescript:
         specifier: ^5.8.3
         version: 5.8.3
+
+  packages/example:
+    dependencies:
+      '@infra-glue/cli':
+        specifier: workspace:*
+        version: link:../cli
+      '@infra-glue/provider-terraform':
+        specifier: workspace:*
+        version: link:../provider-terraform
 
   packages/provider-core:
     dependencies:
@@ -118,7 +118,7 @@ importers:
 
   packages/provider-terraform:
     dependencies:
-      '@platform-tools/provider-core':
+      '@infra-glue/provider-core':
         specifier: workspace:*
         version: link:../provider-core
     devDependencies:

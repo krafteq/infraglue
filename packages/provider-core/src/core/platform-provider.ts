@@ -8,7 +8,7 @@ export async function getProvider(configuration: PlatformDetectionResult, rootPa
   if (providerName === 'platform') {
     return new PlatformProvider()
   }
-  const providerPackageName = `@platform-tools/provider-${providerName}`
+  const providerPackageName = `@infra-glue/provider-${providerName}`
   const providerModule = (await importFrom(resolvedRootPath, providerPackageName)) as { default: new () => Provider }
   if (typeof providerModule.default !== 'function') {
     throw new Error(`Provider ${providerName} from ${providerPackageName} is not a function`)

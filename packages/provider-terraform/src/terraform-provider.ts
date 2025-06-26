@@ -1,4 +1,4 @@
-import { Provider, type PlatformDetectionResult } from '@platform-tools/provider-core'
+import { Provider, type PlatformDetectionResult } from '@infra-glue/provider-core'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 
