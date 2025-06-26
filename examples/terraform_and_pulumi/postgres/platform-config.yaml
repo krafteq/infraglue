@@ -4,5 +4,8 @@
 
 provider: terraform
 
-injection:
-  network_name: '../docker-network:network_name'
+# injection:
+#   network_name: '../docker-network:network_name'
+
+depends_on:
+  - ../docker-network

@@ -65,9 +65,9 @@ export class PlatformProvider extends Provider {
       const output = configuration.output[outputKey]
       const valueToOutput = output.workspace ? planCache.get(output.workspace)?.output[output.key] : input[output.key]
       if (valueToOutput === undefined) {
-        throw new Error(`Value to output ${output.key} from workspace ${output.workspace} is not found`)
+        // throw new Error(`Value to output ${output.key} from workspace ${output.workspace} is not found`)
       }
-      result.output[outputKey] = valueToOutput
+      result.output[outputKey] = valueToOutput ?? 'TO_BE_DEFINED'
     }
     result.text = Array.from(planCache.entries())
       .map(([workspaceKey, plan]) => `${workspaceKey}:\n${plan.text}`)

@@ -5,7 +5,8 @@
 provider: terraform
 
 injection:
-  network_name: '../docker-network:network_name'
+  # TODO: pulumi is even worse with previewing outputs than terraform
+  # network_name: '../docker-network:network_name'
   database_host: '../postgres:database_host'
   # TODO: it is tricky. terraform plan doesn't return the port, so we cannot inject it
   # terraform only provides it on apply
@@ -15,3 +16,6 @@ injection:
   database_name: '../postgres:database_name'
   database_user: '../postgres:database_user'
   database_password: '../postgres:database_password'
+
+depends_on:
+  - ../docker-network

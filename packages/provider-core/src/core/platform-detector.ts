@@ -35,6 +35,7 @@ export interface PlatformConfig {
   provider?: string
   injection?: Record<string, string>
   output?: Record<string, string>
+  depends_on?: string[]
   [key: string]: unknown
 }
 
@@ -49,6 +50,7 @@ export interface PlatformDetectionResult {
   workspaces: Record<string, PlatformDetectionResult>
   injections: Record<string, PlatformInjection>
   output?: Record<string, PlatformInjection>
+  depends_on?: string[]
 }
 
 const CONFIG_FILE_NAME = 'platform-config.yaml'
@@ -80,6 +82,7 @@ export async function getPlatformConfiguration(
     workspaces,
     injections: {},
     output: {},
+    depends_on: [],
   }
   if (config.injection) {
     result.injections = {}
@@ -93,6 +96,9 @@ export async function getPlatformConfiguration(
         throw new Error(`Invalid injection ${key}: ${config.injection[key]}`)
       }
     }
+  }
+  if (config.depends_on) {
+    result.depends_on = config.depends_on.map((dep) => join(rootPath, dep))
   }
   if (config.output) {
     result.output = {}
@@ -215,6 +221,15 @@ function getDependencyGraph(config: PlatformDetectionResult) {
       } else {
         dependencies[workspaceKey] = [...(dependencies[workspaceKey] || []), injection.workspace]
       }
+    }
+    for (const depends_on of workspace.depends_on || []) {
+      const dependency = config.workspaces[depends_on]
+      if (!dependency) {
+        errors.push(
+          `Depends on ${depends_on} of workspace ${workspaceKey} references non-existent workspace ${depends_on}`,
+        )
+      }
+      dependencies[workspaceKey] = [...(dependencies[workspaceKey] || []), depends_on]
     }
   }
   // validate that all outputs are valid

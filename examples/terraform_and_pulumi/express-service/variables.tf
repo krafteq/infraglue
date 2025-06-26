@@ -1,6 +1,7 @@
 variable "network_name" {
   description = "Name of the Docker network to connect to"
   type        = string
+  default     = "app-network"
 }
 
 variable "container_name" {

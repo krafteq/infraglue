@@ -95,7 +95,7 @@ export class PulumiProvider extends Provider {
       return Object.fromEntries(
         Object.entries(outputs).map(([key, value]) => [
           key,
-          typeof value.value === 'string' ? value.value : JSON.stringify(value.value),
+          typeof value === 'string' ? value : JSON.stringify(value.value),
         ]),
       )
     } catch (error) {
