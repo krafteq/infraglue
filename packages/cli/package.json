@@ -1,5 +1,5 @@
 {
-  "name": "infra-glue",
+  "name": "@krafteq/infraglue",
   "version": "LOCAL",
   "description": "Tool to manage monorepo IaaC",
   "type": "module",
@@ -21,7 +21,7 @@
     "cli",
     "iac",
     "tools",
-    "infra-glue"
+    "infraglue"
   ],
   "author": "",
   "license": "MIT",
