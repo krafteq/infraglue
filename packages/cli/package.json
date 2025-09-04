@@ -15,7 +15,8 @@
     "show": "tsx ./src/index.ts show ../../examples/terraform_and_pulumi/ --json",
     "interactive-apply": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./src/index.ts interactive-apply ../../examples/terraform_and_pulumi/",
     "interactive-destroy": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./src/index.ts interactive-destroy ../../examples/terraform_and_pulumi/",
-    "ts:check": "tsc --noEmit"
+    "ts:check": "tsc --noEmit",
+    "prepare": "npm run build"
   },
   "keywords": [
     "cli",
