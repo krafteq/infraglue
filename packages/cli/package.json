@@ -1,7 +1,7 @@
 {
-  "name": "@infra-glue/cli",
-  "version": "1.0.0",
-  "description": "CLI tool for infra-glue",
+  "name": "infra-glue",
+  "version": "LOCAL",
+  "description": "Tool to manage monorepo IaaC",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -10,8 +10,12 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "test": "jest",
     "start": "node dist/index.js",
-    "run": "tsx ./src/index.ts show ../../examples/terraform_only/ --json"
+    "show": "tsx ./src/index.ts show ../../examples/terraform_and_pulumi/ --json",
+    "interactive-apply": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./src/index.ts interactive-apply ../../examples/terraform_and_pulumi/",
+    "interactive-destroy": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./src/index.ts interactive-destroy ../../examples/terraform_and_pulumi/",
+    "ts:check": "tsc --noEmit"
   },
   "keywords": [
     "cli",
@@ -21,15 +25,19 @@
   ],
   "author": "",
   "license": "MIT",
-  "packageManager": "pnpm@10.12.1",
   "dependencies": {
-    "@infra-glue/provider-core": "workspace:*",
-    "commander": "^12.0.0",
-    "tsx": "^4.20.3"
+    "commander": "^14.0.0",
+    "tsx": "^4.20.3",
+    "yaml": "^2.8.0",
+    "glob": "^11.0.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "cross-env": "^7.0.3",
+    "jest": "^30.0.4",
+    "ts-jest": "^29.4.0",
+    "@types/jest": "^30.0.0"
   }
 }

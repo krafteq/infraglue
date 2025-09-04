@@ -1,0 +1,5 @@
+encryptionsalt: v1:nqBJTGm7uNk=:v1:yn20wmvPSsvD4oMX:Y3k6YBKL9QTKtxvXZJTS1Hj8JbhxJA==
+config:
+  redis:container_name: qa_ig_redis
+  redis:redis_port: '6379'
+  redis:network_name: qa_ig_example

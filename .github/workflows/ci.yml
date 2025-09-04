@@ -7,42 +7,29 @@ on:
     branches: [main, master]
 
 jobs:
-  lint-and-format:
+  lint-format-tests:
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
-        node-version: [22.10.0, 24.x]
+        node-version: [22]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.12.1
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+          cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm install --frozen-lockfile
 
       - name: Check formatting
         run: pnpm format:check
@@ -50,5 +37,8 @@ jobs:
       - name: Run linter
         run: pnpm lint
 
-      # - name: Check TypeScript
-      #   run: pnpm type-check
+      - name: Check TypeScript
+        run: pnpm ts:check
+
+      - name: Run tests
+        run: pnpm test

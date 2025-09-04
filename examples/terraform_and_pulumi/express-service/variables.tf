@@ -1,13 +1,16 @@
 variable "network_name" {
   description = "Name of the Docker network to connect to"
   type        = string
-  default     = "app-network"
+}
+
+variable "image_name" {
+  description = "Name of the Docker image to use"
+  type = string
 }
 
 variable "container_name" {
   description = "Name of the Express.js container"
   type        = string
-  default     = "express-app"
 }
 
 variable "database_host" {
@@ -18,7 +21,6 @@ variable "database_host" {
 variable "database_port" {
   description = "Database port"
   type        = number
-  default     = 5432
 }
 
 variable "database_name" {
@@ -46,7 +48,6 @@ variable "app_port" {
 variable "external_port" {
   description = "External port to expose the Express.js application"
   type        = number
-  default     = 3000
 }
 
 variable "node_env" {
@@ -59,4 +60,9 @@ variable "project_name" {
   description = "Project name for labeling"
   type        = string
   default     = "terraform-example"
-} 
+}
+
+variable "redis_connection_string" {
+  description = "Connection string to redis"
+  type        = string
+}

@@ -51,7 +51,7 @@ async function initDatabase() {
 // Routes
 app.get('/', (req, res) => {
   res.json({
-    message: 'Express.js API with PostgreSQL',
+    message: `Express.js API with PostgreSQL: ${process.env.DB_HOST}, Redis: ${process.env.REDIS_CONNECTION_STRING}`,
     status: 'running',
     timestamp: new Date().toISOString(),
   })

@@ -1,0 +1,17 @@
+injection:
+  network_name: '../docker-network:network_name'
+
+envs:
+  qa:
+    backend_config:
+      PULUMI_BACKEND_URL: file://./.pulumi/qa
+    var_files: # TODO: ignored by pulumi provider. What should be expected behavior?
+    vars:
+      container_name: qa_ig_redis
+      redis_port: 6379
+  dev:
+    backend_config:
+      PULUMI_BACKEND_URL: file://./.pulumi/dev
+    vars:
+      container_name: dev_ig_redis
+      redis_port: 6378

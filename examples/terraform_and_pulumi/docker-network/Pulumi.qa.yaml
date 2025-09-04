@@ -1,0 +1,3 @@
+encryptionsalt: v1:xnj2YJ7nfrw=:v1:RpNSZAmPWde3B2Pm:VPrBKRZwL3KjYiUJN/oVRC+7xMNM3A==
+config:
+  docker-network:network_name: qa_ig_example

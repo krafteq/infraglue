@@ -1,1 +1,12 @@
-provider: pulumi
+envs:
+  qa:
+    backend_config:
+      PULUMI_BACKEND_URL: file://./.pulumi/qa
+    var_files: # TODO: ignored by pulumi provider. What should be expected behavior?
+    vars:
+      network_name: qa_ig_example
+  dev:
+    backend_config:
+      PULUMI_BACKEND_URL: file://./.pulumi/dev
+    vars:
+      network_name: dev_ig_example

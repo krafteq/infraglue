@@ -1,6 +1,22 @@
 # Infra Glue
 
-A collection of infrastructure glue tools and utilities.
+Tool to manage monorepo IaaC
+
+## Usages
+
+Create configuration file(s) see [examples](examples)
+Install infra glue
+
+```bash
+npm install -g infra-glue
+```
+
+Run from the monorepo root:
+
+```bash
+ig interactive-apply
+ig interactive-destroy
+```
 
 ## Contributing
 

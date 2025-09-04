@@ -1,21 +1,18 @@
-# could be recursive for provider platform
-# workspaces:
-#  - "./*"
-
-provider: terraform
-
 injection:
-  # TODO: pulumi is even worse with previewing outputs than terraform
-  # network_name: '../docker-network:network_name'
+  network_name: '../docker-network:network_name'
   database_host: '../postgres:database_host'
-  # TODO: it is tricky. terraform plan doesn't return the port, so we cannot inject it
-  # terraform only provides it on apply
-  # probably we should somhow understand it is a number and generate random one?? To be discussed
-  # it is the most trickiest part of the whole infra-glue as far as I can see right now
-  #  database_port: "../postgres:database_port"
+  database_port: '../postgres:database_port'
   database_name: '../postgres:database_name'
   database_user: '../postgres:database_user'
   database_password: '../postgres:database_password'
+  redis_connection_string: '../redis:redis_connection_string'
 
-depends_on:
-  - ../docker-network
+envs:
+  qa:
+    backend_file: ./envs/qa_backend.tf
+    var_files:
+      - ./envs/qa.tfvars
+  dev:
+    backend_file: ./envs/dev_backend.tf
+    var_files:
+      - ./envs/dev.tfvars

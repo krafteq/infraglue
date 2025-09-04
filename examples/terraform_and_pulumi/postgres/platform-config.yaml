@@ -1,11 +1,16 @@
-# could be recursive
-# workspaces:
-#  - "./*"
+injection:
+  network_name: '../docker-network:network_name'
 
-provider: terraform
-
-# injection:
-#   network_name: '../docker-network:network_name'
-
-depends_on:
-  - ../docker-network
+envs:
+  qa:
+    backend_type: local
+    backend_config:
+      path: ./terraform_qa.tfstate
+    var_files:
+      - ./envs/qa.tfvars
+  dev:
+    backend_type: local
+    backend_config:
+      path: ./terraform_dev.tfstate
+    var_files:
+      - ./envs/dev.tfvars

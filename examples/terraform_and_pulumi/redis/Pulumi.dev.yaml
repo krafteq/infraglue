@@ -1,0 +1,7 @@
+config:
+  redis:redis_port: '6378'
+  redis:redis_password: 'your-redis-password'
+  redis:redis_version: '7.2-alpine'
+  redis:container_name: 'dev_ig_redis'
+  redis:network_name: dev_ig_example
+encryptionsalt: v1:WmB0TOj8sp8=:v1:K0qIo/fcGxNFzNRI:6nABby3dUKQTkXuztN6JNih0ZLlbMQ==

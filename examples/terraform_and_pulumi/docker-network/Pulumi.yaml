@@ -12,10 +12,3 @@ description: Docker network Pulumi project
 # - cloudflare
 # - or leave empty to use Pulumi Cloud
 secretsprovider: passphrase
-
-backend:
-  url: file://./.pulumi
-  # Alternative backends:
-  # url: https://app.pulumi.com
-  # url: https://pulumi.yourcompany.com
-  # url: s3://my-bucket/pulumi

@@ -1,1 +1,3 @@
-encryptionsalt: v1:rbGJPOhCEig=:v1:lfZiLmiQMlXu5oyU:fdcazhRxuwn5XfVUS61PbBYDxEilUQ==
+encryptionsalt: v1:FAc5DWvrWo0=:v1:6xUX35BBCqRVUCSZ:lpemlObBkVI1mAEnxnvO/ST4lN2vSg==
+config:
+  docker-network:network_name: dev_ig_example
