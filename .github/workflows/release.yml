@@ -34,6 +34,6 @@ jobs:
           pnpm -r exec -- pnpm version ${GITHUB_REF#refs/tags/v} --no-git-tag-version
 
       - name: Publish to npm
-        run: pnpm -r publish --no-git-checks
+        run: pnpm -r publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_PUBLISH }}
