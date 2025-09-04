@@ -23,7 +23,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Extract version from Git tag
         id: extract_version
@@ -31,12 +31,12 @@ jobs:
 
       - name: Update package.json version
         run: |
-          npm version $VERSION --no-git-tag-version
+          pnpm version $VERSION --no-git-tag-version
 
       - name: Run tests
-        run: npm test
+        run: pnpm test
 
       - name: Publish to npm
-        run: npm publish
+        run: pnpm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_PUBLISH }}
