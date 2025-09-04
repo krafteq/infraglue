@@ -25,18 +25,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Extract version from Git tag
-        id: extract_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
-
-      - name: Update package.json version
-        run: |
-          pnpm version $VERSION --no-git-tag-version
-
       - name: Run tests
         run: pnpm test
 
+      - name: Update package.json version
+        run: |
+          pnpm -r version ${GITHUB_REF#refs/tags/v} --no-git-tag-version
+
       - name: Publish to npm
-        run: pnpm publish
+        run: pnpm -r publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_PUBLISH }}
