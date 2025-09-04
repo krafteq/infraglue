@@ -30,7 +30,7 @@ jobs:
 
       - name: Update package.json version
         run: |
-          pnpm -r version ${GITHUB_REF#refs/tags/v} --no-git-tag-version
+          pnpm -r exec -- pnpm version ${GITHUB_REF#refs/tags/v} --no-git-tag-version
 
       - name: Publish to npm
         run: pnpm -r publish --no-git-checks
