@@ -1,16 +1,3 @@
-/**
- * PlatformDetector class for detecting and managing platform configurations.
- *
- * @example
- * import { PlatformDetector } from '@infra-glue/provider-core'
- *
- * const detector = new PlatformDetector()
- * const result = await detector.detectPlatform('/path/to/project')
- *
- * console.log('Workspaces found:', result.workspaces.size)
- * console.log('Execution order:', result.levels)
- */
-
 import { readFile } from 'fs'
 import { join } from 'path'
 import { parse as parseYaml } from 'yaml'

@@ -15,6 +15,7 @@ import {
 } from './providers/index.js'
 import { getFormatter } from './formatters/index.js'
 import { getIntegration } from './integrations/index.js'
+import { logger } from './utils/logger.js'
 
 const readFileAsync = promisify(readFile)
 
@@ -31,8 +32,18 @@ const program = new Command()
 
 program
   .name('ig')
+  .option('-v, --verbose', 'Show verbose output')
+  .option('-q, --quiet', 'Show quiet output')
   .description('CLI tool for infra-glue')
   .version(await getPackageJsonVersion())
+  .hook('preAction', (command) => {
+    if (command.opts().verbose) {
+      logger.setVerbose()
+    }
+    if (command.opts().quiet) {
+      logger.setQuiet()
+    }
+  })
 
 program
   .command('apply')
@@ -54,19 +65,19 @@ program
       { format, integration, approve, env }: { format?: string; integration?: string; approve?: number; env: string },
     ) => {
       const resolvedPath = resolve(directory)
-      console.log(`Applying platform configuration in: ${resolvedPath}`)
+      logger.info(`Applying platform configuration in: ${resolvedPath}`)
 
       const configuration = await getPlatformConfiguration(resolvedPath)
       if (!configuration) {
-        console.log('No platform configuration found')
+        logger.info('No platform configuration found')
         return
       }
       const outputsCache: Map<string, ProviderOutput> = new Map()
 
       for (let levelIndex = 0; levelIndex < configuration.levels.length; levelIndex++) {
         const level = configuration.levels[levelIndex]
-        console.log(`\n🔧 Processing Level ${levelIndex + 1}/${configuration.levels.length}`)
-        console.log('=====================================')
+        logger.info(`\n🔧 Processing Level ${levelIndex + 1}/${configuration.levels.length}`)
+        logger.info('=====================================')
 
         // Collect all plans for this level
         const levelPlans: Array<{
@@ -105,7 +116,7 @@ program
             )
           ) {
             const outputs = await provider.getOutputs(workspace, env)
-            console.log(`✅ ${workspace.rootPath} is up to date. Outputs: ${JSON.stringify(outputs, null, 2)}`)
+            logger.info(`✅ ${workspace.rootPath} is up to date. Outputs: ${JSON.stringify(outputs, null, 2)}`)
             outputsCache.set(workspace.rootPath, outputs)
             continue
           }
@@ -115,14 +126,14 @@ program
 
         // If no plans to apply in this level, continue to next level
         if (levelPlans.length === 0) {
-          console.log('✅ No changes needed in this level')
+          logger.info('✅ No changes needed in this level')
           continue
         }
 
         // TODO: it should probably be part of the formatter as well.
-        console.log('--------------------------------')
-        console.log(`📋 Level ${levelIndex + 1} Plan Summary:`)
-        console.log('--------------------------------')
+        logger.info('--------------------------------')
+        logger.info(`📋 Level ${levelIndex + 1} Plan Summary:`)
+        logger.info('--------------------------------')
 
         let totalAdd = 0
         let totalChange = 0
@@ -130,8 +141,8 @@ program
         let totalReplace = 0
 
         for (const { workspace, plan } of levelPlans) {
-          console.log(`\n🏭 Workspace: ${workspace.rootPath}`)
-          console.log(
+          logger.info(`\n🏭 Workspace: ${workspace.rootPath}`)
+          logger.info(
             `   Add: ${plan.changeSummary.add}, Change: ${plan.changeSummary.change}, Remove: ${plan.changeSummary.remove}, Replace: ${plan.changeSummary.replace}`,
           )
           totalAdd += plan.changeSummary.add
@@ -140,7 +151,7 @@ program
           totalReplace += plan.changeSummary.replace
         }
 
-        console.log(
+        logger.info(
           `\n📊 Total Changes: Add: ${totalAdd}, Change: ${totalChange}, Remove: ${totalRemove}, Replace: ${totalReplace}`,
         )
 
@@ -157,37 +168,37 @@ program
 
         const integrationInstance = getIntegration(integration)
         if (!integrationInstance.interactive && approve === levelIndex + 1) {
-          console.log(`Level ${levelIndex + 1} approved, applying...`)
+          logger.info(`Level ${levelIndex + 1} approved, applying...`)
         } else {
           const answer = await integrationInstance.askForConfirmation(message)
 
           if (!integrationInstance.interactive) {
-            console.log('Not interactive, waiting for confirmation and another cli execution')
+            logger.info('Not interactive, waiting for confirmation and another cli execution')
             return
           }
 
           if (!answer) {
-            console.log('Aborting...')
+            logger.info('Aborting...')
             return
           }
         }
 
         // Apply all workspaces in this level
-        console.log(`\n🚀 Applying Level ${levelIndex + 1}...`)
+        logger.info(`\n🚀 Applying Level ${levelIndex + 1}...`)
         const applyPromises = levelPlans.map(async ({ workspace, provider, inputs }) => {
-          console.log(`   Applying ${workspace.rootPath}...`)
+          logger.info(`   Applying ${workspace.rootPath}...`)
           const outputs = await provider.apply(workspace, inputs, env)
           outputsCache.set(workspace.rootPath, outputs)
-          console.log(`   ✅ ${workspace.rootPath} applied successfully`)
+          logger.info(`   ✅ ${workspace.rootPath} applied successfully`)
           return { workspace: workspace.rootPath, outputs }
         })
 
         await Promise.all(applyPromises)
-        console.log(`✅ Level ${levelIndex + 1} completed`)
+        logger.info(`✅ Level ${levelIndex + 1} completed`)
       }
 
-      console.log('\n--------------------------------')
-      console.log('🎉 Infrastructure applied successfully')
+      logger.info('\n--------------------------------')
+      logger.info('🎉 Infrastructure applied successfully')
       const result: ProviderOutput = {}
       for (const outputKey in configuration.output) {
         const output = configuration.output[outputKey]
@@ -197,9 +208,9 @@ program
         }
         result[outputKey] = valueToOutput
       }
-      console.log('Outputs:')
-      console.log(JSON.stringify(result, null, 2))
-      console.log('--------------------------------')
+      logger.info('Outputs:')
+      logger.info(JSON.stringify(result, null, 2))
+      logger.info('--------------------------------')
     },
   )
 
@@ -223,17 +234,17 @@ program
       { format, integration, approve, env }: { format?: string; integration?: string; approve?: number; env: string },
     ) => {
       const resolvedPath = resolve(directory)
-      console.log(`Destroying platform configuration in: ${resolvedPath}`)
+      logger.info(`Destroying platform configuration in: ${resolvedPath}`)
 
       const configuration = await getPlatformConfiguration(resolvedPath)
       if (!configuration) {
-        console.log('No platform configuration found')
+        logger.info('No platform configuration found')
         return
       }
 
       // First, collect all outputs from existing infrastructure
       const outputsCache: Map<string, ProviderOutput> = new Map()
-      console.log('\n📊 Collecting existing infrastructure outputs...')
+      logger.info('\n📊 Collecting existing infrastructure outputs...')
       for (const level of configuration.levels) {
         for (const workspace of level) {
           const provider = getProvider(workspace.provider)
@@ -255,8 +266,8 @@ program
       for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
         const level = levels[levelIndex]
         const originalLevelIndex = levels.length - levelIndex - 1 // Convert back to original index for display
-        console.log(`\n🗑️  Processing Level ${originalLevelIndex + 1}/${levels.length} for destruction`)
-        console.log('=====================================')
+        logger.info(`\n🗑️  Processing Level ${originalLevelIndex + 1}/${levels.length} for destruction`)
+        logger.info('=====================================')
 
         // Collect all destroy plans for this level
         const levelDestroyPlans: Array<{
@@ -273,7 +284,7 @@ program
           }
           const isDestroyed = await provider.isDestroyed(workspace, env)
           if (isDestroyed) {
-            console.log(`✅ ${workspace.rootPath} is already destroyed.`)
+            logger.info(`✅ ${workspace.rootPath} is already destroyed.`)
             continue
           }
 
@@ -299,7 +310,7 @@ program
               plan.changeSummary.replace > 0
             )
           ) {
-            console.log(`✅ Nothing to destroy in ${workspace.rootPath}`)
+            logger.info(`✅ Nothing to destroy in ${workspace.rootPath}`)
             continue
           }
 
@@ -308,14 +319,14 @@ program
 
         // If no plans to destroy in this level, continue to next level
         if (levelDestroyPlans.length === 0) {
-          console.log('✅ No resources to destroy in this level')
+          logger.info('✅ No resources to destroy in this level')
           continue
         }
 
         // Show combined destroy plan for the level
-        console.log('--------------------------------')
-        console.log(`📋 Level ${originalLevelIndex + 1} Destroy Plan Summary:`)
-        console.log('--------------------------------')
+        logger.info('--------------------------------')
+        logger.info(`📋 Level ${originalLevelIndex + 1} Destroy Plan Summary:`)
+        logger.info('--------------------------------')
 
         let totalAdd = 0
         let totalChange = 0
@@ -323,8 +334,8 @@ program
         let totalReplace = 0
 
         for (const { workspace, plan } of levelDestroyPlans) {
-          console.log(`\n🏭 Workspace: ${workspace.rootPath}`)
-          console.log(
+          logger.info(`\n🏭 Workspace: ${workspace.rootPath}`)
+          logger.info(
             `   Add: ${plan.changeSummary.add}, Change: ${plan.changeSummary.change}, Remove: ${plan.changeSummary.remove}, Replace: ${plan.changeSummary.replace}`,
           )
           totalAdd += plan.changeSummary.add
@@ -333,7 +344,7 @@ program
           totalReplace += plan.changeSummary.replace
         }
 
-        console.log(
+        logger.info(
           `\n📊 Total Changes: Add: ${totalAdd}, Change: ${totalChange}, Remove: ${totalRemove}, Replace: ${totalReplace}`,
         )
 
@@ -350,36 +361,36 @@ program
 
         const integrationInstance = getIntegration(integration)
         if (!integrationInstance.interactive && approve === originalLevelIndex + 1) {
-          console.log(`Level ${originalLevelIndex + 1} approved, destroying...`)
+          logger.info(`Level ${originalLevelIndex + 1} approved, destroying...`)
         } else {
           const answer = await integrationInstance.askForConfirmation(message)
 
           if (!integrationInstance.interactive) {
-            console.log('Not interactive, waiting for confirmation and another cli execution')
+            logger.info('Not interactive, waiting for confirmation and another cli execution')
             return
           }
 
           if (!answer) {
-            console.log('Aborting...')
+            logger.info('Aborting...')
             return
           }
         }
 
         // Destroy all workspaces in this level
-        console.log(`\n💥 Destroying Level ${originalLevelIndex + 1}...`)
+        logger.info(`\n💥 Destroying Level ${originalLevelIndex + 1}...`)
         const destroyPromises = levelDestroyPlans.map(async ({ workspace, provider, inputs }) => {
-          console.log(`   Destroying ${workspace.rootPath}...`)
+          logger.info(`   Destroying ${workspace.rootPath}...`)
           await provider.destroy(workspace, inputs, env)
-          console.log(`   ✅ ${workspace.rootPath} destroyed successfully`)
+          logger.info(`   ✅ ${workspace.rootPath} destroyed successfully`)
           return { workspace: workspace.rootPath }
         })
 
         await Promise.all(destroyPromises)
-        console.log(`✅ Level ${originalLevelIndex + 1} destroyed`)
+        logger.info(`✅ Level ${originalLevelIndex + 1} destroyed`)
       }
 
-      console.log('\n--------------------------------')
-      console.log('🎉 Infrastructure destroyed successfully')
+      logger.info('\n--------------------------------')
+      logger.info('🎉 Infrastructure destroyed successfully')
     },
   )
 
@@ -392,16 +403,16 @@ program
   .action(async (directory: string, options: { json?: boolean; verbose?: boolean }) => {
     try {
       const resolvedPath = resolve(directory)
-      console.log(`Analyzing platform configuration in: ${resolvedPath}`)
+      logger.info(`Analyzing platform configuration in: ${resolvedPath}`)
 
       const result = await getPlatformConfiguration(resolvedPath)
       if (!result) {
-        console.log('No platform configuration found')
+        logger.info('No platform configuration found')
         return
       }
 
       if (options.json) {
-        console.log(JSON.stringify(result, null, 2))
+        logger.info(JSON.stringify(result, null, 2))
       } else {
         displayPlatformInfo(result, options.verbose)
       }
@@ -412,28 +423,28 @@ program
   })
 
 function displayPlatformInfo(result: PlatformDetectionResult, verbose: boolean = false) {
-  console.log('\n📋 Platform Configuration Summary')
-  console.log('=====================================')
+  logger.info('\n📋 Platform Configuration Summary')
+  logger.info('=====================================')
 
   if (Object.keys(result.workspaces).length > 0) {
-    console.log(`\n📁 Workspaces (${Object.keys(result.workspaces).length}):`)
+    logger.info(`\n📁 Workspaces (${Object.keys(result.workspaces).length}):`)
     Object.entries(result.workspaces).forEach(([name, workspace]) => {
-      console.log(`  • ${name} (${workspace.provider})`)
+      logger.info(`  • ${name} (${workspace.provider})`)
     })
   } else {
-    console.log('\n📁 No workspaces found')
+    logger.info('\n📁 No workspaces found')
   }
 
   if (result.output && Object.keys(result.output).length > 0) {
-    console.log(`\n📤 Outputs (${Object.keys(result.output).length}):`)
+    logger.info(`\n📤 Outputs (${Object.keys(result.output).length}):`)
     Object.entries(result.output).forEach(([key, output]) => {
-      console.log(`  • ${key} ← ${output.workspace}:${output.key}`)
+      logger.info(`  • ${key} ← ${output.workspace}:${output.key}`)
     })
   }
 
   if (verbose) {
-    console.log('\n🔍 Detailed Information:')
-    console.log(JSON.stringify(result, null, 2))
+    logger.info('\n🔍 Detailed Information:')
+    logger.info(JSON.stringify(result, null, 2))
   }
 }
 

@@ -3,7 +3,7 @@ import type { IIntegration } from './integration.js'
 export const CLI_INTEGRATION: IIntegration = {
   interactive: true,
   askForConfirmation: async (message: string) => {
-    console.log(message)
+    process.stdout.write(message + '\n')
     const answer = await new Promise<string>((resolve) => {
       process.stdin.resume()
       process.stdin.setEncoding('utf8')

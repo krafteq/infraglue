@@ -1,3 +1,5 @@
+import { logger } from '../utils/logger.js'
+
 // TODO: refactor this.
 
 /**
@@ -107,7 +109,7 @@ export class GitLabPipeline {
     const apiUrl = process.env['CI_API_V4_URL']
 
     if (!projectId || !mergeRequestIid || !apiUrl) {
-      console.log(
+      logger.error(
         `Missing required GitLab environment variables: CI_MERGE_REQUEST_PROJECT_ID=${projectId}, CI_MERGE_REQUEST_IID=${mergeRequestIid}, CI_API_V4_URL=${apiUrl}`,
       )
 
