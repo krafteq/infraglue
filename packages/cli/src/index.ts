@@ -125,6 +125,7 @@ program
     }
     return parsedValue
   })
+  .option('-p, --project <project>', 'Project to apply')
   .option('-e, --env <env>', 'environment to apply. If provided, the environment will be selected before applying')
   .action(
     async ({
@@ -132,11 +133,13 @@ program
       integration,
       approve,
       env,
+      project,
     }: {
       format?: string
       integration?: string
       approve?: number
       env: string
+      project?: string
     }) => {
       logger.info(`Applying platform configuration in: ${resolvedPath}`)
 
@@ -149,7 +152,22 @@ program
 
       env = await resolveSelectedEnvironment(resolvedPath, env)
 
-      for (let levelIndex = 0; levelIndex < configuration.levels.length; levelIndex++) {
+      let projectLevel: number | undefined = undefined
+      if (project) {
+        projectLevel = configuration.levels.findIndex((level) => level.find((workspace) => workspace.alias === project))
+        if (projectLevel < 0) {
+          throw new Error(`Project ${project} not found`)
+        }
+        logger.info(
+          `Project ${project} found at level ${projectLevel + 1}. Applying everything until level ${projectLevel + 1}`,
+        )
+      }
+
+      for (
+        let levelIndex = 0;
+        levelIndex < (projectLevel ? projectLevel + 1 : configuration.levels.length);
+        levelIndex++
+      ) {
         const level = configuration.levels[levelIndex]
         logger.info(`\n🔧 Processing Level ${levelIndex + 1}/${configuration.levels.length}`)
         logger.info('=====================================')
@@ -163,6 +181,11 @@ program
         }> = []
 
         for (const workspace of level) {
+          if (project && levelIndex === projectLevel && workspace.alias !== project) {
+            logger.debug(`Skipping ${workspace.alias} as it's not selected project`)
+            continue
+          }
+
           const provider = getProvider(workspace.provider)
           if (!provider) {
             throw new Error(`Provider ${workspace.provider} not found`)
@@ -274,18 +297,20 @@ program
 
       logger.info('\n--------------------------------')
       logger.info('🎉 Infrastructure applied successfully')
-      const result: ProviderOutput = {}
-      for (const outputKey in configuration.output) {
-        const output = configuration.output[outputKey]
-        const valueToOutput = output.workspace ? outputsCache.get(output.workspace)?.[output.key] : 'TODO?'
-        if (valueToOutput === undefined) {
-          throw new Error(`Value to output ${output.key} from workspace ${output.workspace} is not found`)
+      if (!project) {
+        const result: ProviderOutput = {}
+        for (const outputKey in configuration.output) {
+          const output = configuration.output[outputKey]
+          const valueToOutput = output.workspace ? outputsCache.get(output.workspace)?.[output.key] : 'TODO?'
+          if (valueToOutput === undefined) {
+            throw new Error(`Value to output ${output.key} from workspace ${output.workspace} is not found`)
+          }
+          result[outputKey] = valueToOutput
         }
-        result[outputKey] = valueToOutput
+        logger.info('Outputs:')
+        logger.info(JSON.stringify(result, null, 2))
+        logger.info('--------------------------------')
       }
-      logger.info('Outputs:')
-      logger.info(JSON.stringify(result, null, 2))
-      logger.info('--------------------------------')
     },
   )
 
@@ -301,6 +326,7 @@ program
     }
     return parsedValue
   })
+  .option('-p, --project <project>', 'Project to destroy')
   .option('-e, --env <env>', 'environment to apply. If provided, the environment will be selected before applying')
   .action(
     async ({
@@ -308,11 +334,13 @@ program
       integration,
       approve,
       env,
+      project,
     }: {
       format?: string
       integration?: string
       approve?: number
       env: string
+      project?: string
     }) => {
       logger.info(`Destroying platform configuration in: ${resolvedPath}`)
 
@@ -337,18 +365,25 @@ program
             const outputs = await provider.getOutputs(workspace, env)
             outputsCache.set(workspace.rootPath, outputs)
           } catch (error) {
-            console.warn(`❌ couldn't load outputs for ${workspace.alias}: ${error}`)
+            logger.warn(`❌ couldn't load outputs for ${workspace.alias}: ${error}`)
           }
         }
       }
 
-      // Process levels in reverse order for destruction
-      const levels = configuration.levels.reverse()
+      let projectLevel: number | undefined = undefined
+      if (project) {
+        projectLevel = configuration.levels.findIndex((level) => level.find((workspace) => workspace.alias === project))
+        if (projectLevel < 0) {
+          throw new Error(`Project ${project} not found`)
+        }
+        logger.info(
+          `Project ${project} found at level ${projectLevel + 1}. Destroying everything above level ${projectLevel + 1}`,
+        )
+      }
 
-      for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
-        const level = levels[levelIndex]
-        const originalLevelIndex = levels.length - levelIndex - 1 // Convert back to original index for display
-        logger.info(`\n🗑️  Processing Level ${originalLevelIndex + 1}/${levels.length} for destruction`)
+      for (let levelIndex = configuration.levels.length - 1; levelIndex >= (projectLevel || 0); levelIndex--) {
+        const level = configuration.levels[levelIndex]
+        logger.info(`\n🗑️  Processing Level ${levelIndex + 1}/${configuration.levels.length} for destruction`)
         logger.info('=====================================')
 
         // Collect all destroy plans for this level
@@ -360,7 +395,12 @@ program
         }> = []
 
         for (const workspace of level) {
-          const provider = await getProvider(workspace.provider)
+          if (project && levelIndex === projectLevel && workspace.alias !== project) {
+            logger.debug(`Skipping ${workspace.alias} as it's not selected project`)
+            continue
+          }
+
+          const provider = getProvider(workspace.provider)
           if (!provider) {
             throw new Error(`Provider ${workspace.provider} not found`)
           }
@@ -407,7 +447,7 @@ program
 
         // Show combined destroy plan for the level
         logger.info('--------------------------------')
-        logger.info(`📋 Level ${originalLevelIndex + 1} Destroy Plan Summary:`)
+        logger.info(`📋 Level ${levelIndex + 1} Destroy Plan Summary:`)
         logger.info('--------------------------------')
 
         let totalAdd = 0
@@ -439,11 +479,11 @@ program
           .join('\n--------------------------------\n')
 
         message += '\n--------------------------------\n'
-        message += `🗑️  Destroy all workspaces in Level ${originalLevelIndex + 1}? (y/n)`
+        message += `🗑️  Destroy all workspaces in Level ${levelIndex + 1}? (y/n)`
 
         const integrationInstance = getIntegration(integration)
-        if (!integrationInstance.interactive && approve === originalLevelIndex + 1) {
-          logger.info(`Level ${originalLevelIndex + 1} approved, destroying...`)
+        if (!integrationInstance.interactive && approve === levelIndex + 1) {
+          logger.info(`Level ${levelIndex + 1} approved, destroying...`)
         } else {
           const answer = await integrationInstance.askForConfirmation(message)
 
@@ -459,7 +499,7 @@ program
         }
 
         // Destroy all workspaces in this level
-        logger.info(`\n💥 Destroying Level ${originalLevelIndex + 1}...`)
+        logger.info(`\n💥 Destroying Level ${levelIndex + 1}...`)
         const destroyPromises = levelDestroyPlans.map(async ({ workspace, provider, inputs }) => {
           logger.info(`   Destroying ${workspace.alias}...`)
           await provider.destroy(workspace, inputs, env)
@@ -468,7 +508,7 @@ program
         })
 
         await Promise.all(destroyPromises)
-        logger.info(`✅ Level ${originalLevelIndex + 1} destroyed`)
+        logger.info(`✅ Level ${levelIndex + 1} destroyed`)
       }
 
       logger.info('\n--------------------------------')
