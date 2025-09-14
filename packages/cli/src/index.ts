@@ -30,12 +30,12 @@ export async function getPackageJsonVersion(): Promise<string> {
 const program = new Command()
 
 program
-  .name('platform')
+  .name('ig')
   .description('CLI tool for infra-glue')
   .version(await getPackageJsonVersion())
 
 program
-  .command('interactive-apply')
+  .command('apply')
   .description('Apply the platform configuration for a directory interactively')
   .argument('[directory]', 'Directory to apply (defaults to current directory)', '.')
   .option('-f, --format <format>', 'Format the plan', 'default')
@@ -204,7 +204,7 @@ program
   )
 
 program
-  .command('interactive-destroy')
+  .command('destroy')
   .description('Destroy the platform configuration for a directory interactively')
   .argument('[directory]', 'Directory to destroy (defaults to current directory)', '.')
   .option('-f, --format <format>', 'Format the plan', 'default')
