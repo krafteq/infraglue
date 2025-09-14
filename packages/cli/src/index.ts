@@ -476,7 +476,17 @@ program
     },
   )
 
-program
+const configCommand = program.command('config')
+
+configCommand
+  .command('init')
+  .description('To be implemented. Initialize a new platform configuration for a directory')
+  .action(async () => {
+    logger.info(`Initializing platform configuration in: ${resolvedPath}`)
+    logger.error('Not implemented yet')
+  })
+
+configCommand
   .command('show')
   .description('Parse and show platform configuration for a directory')
   .option('-j, --json', 'Output in JSON format')
