@@ -6,6 +6,7 @@ import type { ProviderConfig } from '../core/index.js'
 import type { IProvider } from './provider.js'
 import type { ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary } from './provider-plan.js'
+import { saveTemporalFile } from '../core/state-manager'
 
 const execAsync = promisify(exec)
 
@@ -15,7 +16,7 @@ class TerraformProvider implements IProvider {
   }
 
   async getPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
-    const variables = this.getVariableString(configuration, input, environment)
+    const variables = await this.getVariableString(configuration, input, environment)
 
     const stdout = await this.execCommand(`terraform plan --json ${variables}`, configuration)
 
@@ -23,7 +24,7 @@ class TerraformProvider implements IProvider {
   }
 
   async apply(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderOutput> {
-    const variables = this.getVariableString(configuration, input, environment)
+    const variables = await this.getVariableString(configuration, input, environment)
 
     await this.execCommand(`terraform apply --auto-approve --json ${variables}`, configuration)
 
@@ -42,7 +43,7 @@ class TerraformProvider implements IProvider {
   }
 
   async destroyPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
-    const variables = this.getVariableString(configuration, input, environment)
+    const variables = await this.getVariableString(configuration, input, environment)
 
     const stdout = await this.execCommand(`terraform plan -destroy --json ${variables}`, configuration)
 
@@ -50,7 +51,7 @@ class TerraformProvider implements IProvider {
   }
 
   async destroy(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<void> {
-    const variables = this.getVariableString(configuration, input, environment)
+    const variables = await this.getVariableString(configuration, input, environment)
 
     await this.execCommand(`terraform destroy --auto-approve ${variables}`, configuration)
   }
@@ -196,13 +197,14 @@ class TerraformProvider implements IProvider {
     }
   }
 
-  private getVariableString(configuration: ProviderConfig, input: ProviderInput, environment: string) {
+  private async getVariableString(configuration: ProviderConfig, input: ProviderInput, environment: string) {
     const { var_files, vars } = configuration.envs?.[environment] || { vars: {}, var_files: [] }
     const variables = Object.entries({ ...vars, ...input }) // TODO: what is more important? or maybe error in case of collision?
-      .map(([key, value]) => `-var "${key}=${value}"`)
-      .join(' ')
+      .map(([key, value]) => `${key}="${value}"`)
+      .join('\n')
+    const tempVarFile = await saveTemporalFile(configuration.rootPath, 'terraform-vars.tfvars', variables)
     const filesStr = var_files?.map((f) => `-var-file=${f}`)?.join(' ') || ''
-    return [filesStr, variables].join(' ')
+    return `${filesStr} -var-file=${tempVarFile}`
   }
 
   private async execCommand(
@@ -237,10 +239,13 @@ class TerraformProvider implements IProvider {
       const parsed = stdout
         .split('\n')
         .filter((line) => line.trim() !== '')
-        .map((line) => JSON.parse(line) as { '@message': string; diagnostic?: { summary: string } })
+        .map((line) => JSON.parse(line) as { '@message': string; diagnostic?: { summary: string; detail?: string } })
 
       return parsed
-        .map((x) => `${x['@message']}${x.diagnostic?.summary ? `\n\t\t\t${x.diagnostic.summary}` : ''}`)
+        .map(
+          (x) =>
+            `${x['@message']}${x.diagnostic?.summary ? `\n\t\t\t${x.diagnostic.summary}` : ''}${x.diagnostic?.detail ? `\n\t\t\t${x.diagnostic.detail}` : ''}`,
+        )
         .join('\n\t\t')
     } catch {
       return stdout
