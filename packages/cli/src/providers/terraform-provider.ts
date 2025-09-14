@@ -27,7 +27,7 @@ class TerraformProvider implements IProvider {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string; stdout?: string }
         throw new Error(
-          `Terraform plan failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
+          `Terraform plan failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
         )
       }
       throw error
@@ -53,7 +53,7 @@ class TerraformProvider implements IProvider {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string; stdout?: string }
         throw new Error(
-          `Terraform apply failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
+          `Terraform apply failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
         )
       }
       throw error
@@ -72,7 +72,7 @@ class TerraformProvider implements IProvider {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string; stdout?: string }
         throw new Error(
-          `Terraform output failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
+          `Terraform output failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
         )
       }
       throw error
@@ -92,7 +92,7 @@ class TerraformProvider implements IProvider {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string; stdout?: string }
         throw new Error(
-          `Terraform destroy preview failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
+          `Terraform destroy preview failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
         )
       }
       throw error
@@ -110,7 +110,7 @@ class TerraformProvider implements IProvider {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string; stdout?: string }
         throw new Error(
-          `Terraform destroy preview failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
+          `Terraform destroy preview failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
         )
       }
       throw error
@@ -127,7 +127,7 @@ class TerraformProvider implements IProvider {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string; stdout?: string }
         throw new Error(
-          `Terraform destroy preview failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
+          `Terraform destroy preview failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
         )
       }
       throw error
@@ -262,10 +262,11 @@ class TerraformProvider implements IProvider {
         }
       }
       const backendConfigArgs = this.backendConfigToArgs(configuration.envs?.[environment]?.backend_config)
-      // TODO: double check --reconfigure, it could be expensive, mb we need init as a separate step?
       await execAsync(`terraform init ${backendConfigArgs} --reconfigure`, { cwd: configuration.rootPath })
     } catch (error) {
-      throw new Error(`Failed to initialize Terraform: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      throw new Error(
+        `Failed to initialize Terraform in ${configuration.alias}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      )
     }
   }
 

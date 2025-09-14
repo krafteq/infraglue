@@ -1,5 +1,5 @@
 import { readFile } from 'fs'
-import { join } from 'path'
+import { join, relative } from 'path'
 import { parse as parseYaml } from 'yaml'
 import { promisify } from 'util'
 import { glob } from 'glob'
@@ -25,6 +25,7 @@ export interface PlatformConfig {
   output?: Record<string, string>
   depends_on?: string[]
   envs?: Record<string, EnvironmentConfig>
+  alias?: string
   [key: string]: unknown
 }
 
@@ -46,6 +47,7 @@ export interface ProviderConfig {
   injections: Record<string, PlatformInjection>
   depends_on?: string[]
   envs: Record<string, EnvironmentConfig> | undefined
+  alias: string
 }
 
 const CONFIG_FILE_NAMES = ['platform-config.yaml', 'platform-config.yml']
@@ -118,6 +120,7 @@ async function getWorkspaceConfiguration(path: string): Promise<ProviderConfig> 
     ),
     depends_on: (config?.depends_on || []).map((dependency) => join(path, dependency)),
     envs: config?.envs,
+    alias: config?.alias || '',
   }
 }
 
@@ -138,7 +141,11 @@ async function readWorkspaces(rootConfig: PlatformConfig, rootPath: string): Pro
   return Object.fromEntries(
     (await Promise.all(workspacePaths.flat().map(getWorkspaceConfiguration))).map((config, index) => [
       workspacePaths.flat()[index],
-      { ...config, envs: config.envs || rootConfig.envs },
+      {
+        ...config,
+        envs: config.envs || rootConfig.envs,
+        alias: config.alias || relative(rootPath, config.rootPath),
+      },
     ]),
   )
 }

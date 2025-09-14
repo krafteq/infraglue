@@ -68,7 +68,7 @@ const selectEnv = async (env: string) => {
       if (!provider) {
         throw new Error(`Provider ${workspace.provider} not found`)
       }
-      logger.info(`Selecting environment for ${workspace.rootPath}`)
+      logger.info(`Selecting environment for ${workspace.alias}`)
       promises.push(provider.selectEnvironment(workspace, env))
     }
   }
@@ -191,7 +191,7 @@ program
             )
           ) {
             const outputs = await provider.getOutputs(workspace, env)
-            logger.info(`✅ ${workspace.rootPath} is up to date. Outputs: ${JSON.stringify(outputs, null, 2)}`)
+            logger.info(`✅ ${workspace.alias} is up to date. Outputs: ${JSON.stringify(outputs, null, 2)}`)
             outputsCache.set(workspace.rootPath, outputs)
             continue
           }
@@ -216,7 +216,7 @@ program
         let totalReplace = 0
 
         for (const { workspace, plan } of levelPlans) {
-          logger.info(`\n🏭 Workspace: ${workspace.rootPath}`)
+          logger.info(`\n🏭 Workspace: ${workspace.alias}`)
           logger.info(
             `   Add: ${plan.changeSummary.add}, Change: ${plan.changeSummary.change}, Remove: ${plan.changeSummary.remove}, Replace: ${plan.changeSummary.replace}`,
           )
@@ -234,7 +234,7 @@ program
           .map(({ workspace, inputs, plan }) => {
             const formatter = getFormatter(format)
             const formatted = formatter.format(plan)
-            return `🏭 Workspace: ${workspace.rootPath}\nInputs:\n${JSON.stringify(inputs, null, 2)}\nPlan:\n${formatted}`
+            return `🏭 Workspace: ${workspace.alias}\nInputs:\n${JSON.stringify(inputs, null, 2)}\nPlan:\n${formatted}`
           })
           .join('\n--------------------------------\n')
 
@@ -261,10 +261,10 @@ program
         // Apply all workspaces in this level
         logger.info(`\n🚀 Applying Level ${levelIndex + 1}...`)
         const applyPromises = levelPlans.map(async ({ workspace, provider, inputs }) => {
-          logger.info(`   Applying ${workspace.rootPath}...`)
+          logger.info(`   Applying ${workspace.alias}...`)
           const outputs = await provider.apply(workspace, inputs, env)
           outputsCache.set(workspace.rootPath, outputs)
-          logger.info(`   ✅ ${workspace.rootPath} applied successfully`)
+          logger.info(`   ✅ ${workspace.alias} applied successfully`)
           return { workspace: workspace.rootPath, outputs }
         })
 
@@ -337,7 +337,7 @@ program
             const outputs = await provider.getOutputs(workspace, env)
             outputsCache.set(workspace.rootPath, outputs)
           } catch (error) {
-            console.warn(`❌ couldn't load outputs for ${workspace.rootPath}: ${error}`)
+            console.warn(`❌ couldn't load outputs for ${workspace.alias}: ${error}`)
           }
         }
       }
@@ -366,7 +366,7 @@ program
           }
           const isDestroyed = await provider.isDestroyed(workspace, env)
           if (isDestroyed) {
-            logger.info(`✅ ${workspace.rootPath} is already destroyed.`)
+            logger.info(`✅ ${workspace.alias} is already destroyed.`)
             continue
           }
 
@@ -392,7 +392,7 @@ program
               plan.changeSummary.replace > 0
             )
           ) {
-            logger.info(`✅ Nothing to destroy in ${workspace.rootPath}`)
+            logger.info(`✅ Nothing to destroy in ${workspace.alias}`)
             continue
           }
 
@@ -416,7 +416,7 @@ program
         let totalReplace = 0
 
         for (const { workspace, plan } of levelDestroyPlans) {
-          logger.info(`\n🏭 Workspace: ${workspace.rootPath}`)
+          logger.info(`\n🏭 Workspace: ${workspace.alias}`)
           logger.info(
             `   Add: ${plan.changeSummary.add}, Change: ${plan.changeSummary.change}, Remove: ${plan.changeSummary.remove}, Replace: ${plan.changeSummary.replace}`,
           )
@@ -434,7 +434,7 @@ program
         let message = levelDestroyPlans
           .map(({ workspace, plan }) => {
             const formatted = formatter.format(plan)
-            return `🏭 Workspace: ${workspace.rootPath}\nDestroy Plan:\n${formatted}`
+            return `🏭 Workspace: ${workspace.alias}\nDestroy Plan:\n${formatted}`
           })
           .join('\n--------------------------------\n')
 
@@ -461,9 +461,9 @@ program
         // Destroy all workspaces in this level
         logger.info(`\n💥 Destroying Level ${originalLevelIndex + 1}...`)
         const destroyPromises = levelDestroyPlans.map(async ({ workspace, provider, inputs }) => {
-          logger.info(`   Destroying ${workspace.rootPath}...`)
+          logger.info(`   Destroying ${workspace.alias}...`)
           await provider.destroy(workspace, inputs, env)
-          logger.info(`   ✅ ${workspace.rootPath} destroyed successfully`)
+          logger.info(`   ✅ ${workspace.alias} destroyed successfully`)
           return { workspace: workspace.rootPath }
         })
 
