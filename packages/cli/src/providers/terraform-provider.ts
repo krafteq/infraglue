@@ -16,17 +16,12 @@ class TerraformProvider implements IProvider {
 
   async getPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
     try {
-      await this.checkTerraformInstallation()
-
-      await this.initializeTerraform(configuration, environment)
-
       const variables = this.getVariableString(configuration, input, environment)
 
       const { stdout } = await execAsync(`terraform plan --json ${variables}`, {
         cwd: configuration.rootPath,
       })
 
-      // Map Terraform output to common ProviderPlan structure
       return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
     } catch (error) {
       if (error instanceof Error) {
@@ -41,10 +36,6 @@ class TerraformProvider implements IProvider {
 
   async apply(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderOutput> {
     try {
-      await this.checkTerraformInstallation()
-
-      await this.initializeTerraform(configuration, environment)
-
       const variables = this.getVariableString(configuration, input, environment)
 
       await execAsync(`terraform apply --auto-approve --json ${variables}`, {
@@ -69,12 +60,8 @@ class TerraformProvider implements IProvider {
     }
   }
 
-  async getOutputs(configuration: ProviderConfig, env: string): Promise<ProviderOutput> {
+  async getOutputs(configuration: ProviderConfig): Promise<ProviderOutput> {
     try {
-      await this.checkTerraformInstallation()
-
-      await this.initializeTerraform(configuration, env)
-
       const { stdout: outputStdout } = await execAsync(`terraform output --json`, {
         cwd: configuration.rootPath,
       })
@@ -94,17 +81,12 @@ class TerraformProvider implements IProvider {
 
   async destroyPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
     try {
-      await this.checkTerraformInstallation()
-
-      await this.initializeTerraform(configuration, environment)
-
       const variables = this.getVariableString(configuration, input, environment)
 
       const { stdout } = await execAsync(`terraform plan -destroy --json ${variables}`, {
         cwd: configuration.rootPath,
       })
 
-      // Map Terraform output to common ProviderPlan structure
       return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
     } catch (error) {
       if (error instanceof Error) {
@@ -119,10 +101,6 @@ class TerraformProvider implements IProvider {
 
   async destroy(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<void> {
     try {
-      await this.checkTerraformInstallation()
-
-      await this.initializeTerraform(configuration, environment)
-
       const variables = this.getVariableString(configuration, input, environment)
 
       await execAsync(`terraform destroy --auto-approve ${variables}`, {
@@ -139,12 +117,8 @@ class TerraformProvider implements IProvider {
     }
   }
 
-  async isDestroyed(configuration: ProviderConfig, environment: string): Promise<boolean> {
+  async isDestroyed(configuration: ProviderConfig): Promise<boolean> {
     try {
-      await this.checkTerraformInstallation()
-
-      await this.initializeTerraform(configuration, environment)
-
       const { stdout } = await execAsync(`terraform state list`, {
         cwd: configuration.rootPath,
       })
@@ -158,6 +132,12 @@ class TerraformProvider implements IProvider {
       }
       throw error
     }
+  }
+
+  async selectEnvironment(configuration: ProviderConfig, env: string): Promise<void> {
+    await this.checkTerraformInstallation()
+
+    await this.initializeTerraform(configuration, env)
   }
 
   async existsInFolder(folderPath: string): Promise<boolean> {

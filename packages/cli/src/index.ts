@@ -16,6 +16,7 @@ import {
 import { getFormatter } from './formatters/index.js'
 import { getIntegration } from './integrations/index.js'
 import { logger } from './utils/logger.js'
+import { readInternalState, writeInternalState } from './core/state-manager'
 
 const readFileAsync = promisify(readFile)
 
@@ -30,10 +31,16 @@ export async function getPackageJsonVersion(): Promise<string> {
 
 const program = new Command()
 
+let resolvedPath: string // TODO: it shouldn't be global, should it?
 program
   .name('ig')
   .option('-v, --verbose', 'Show verbose output')
   .option('-q, --quiet', 'Show quiet output')
+  .option(
+    '-d, --directory <directory>',
+    'Root directory of infrastructure monorepo (defaults to current directory)',
+    '.',
+  )
   .description('CLI tool for infra-glue')
   .version(await getPackageJsonVersion())
   .hook('preAction', (command) => {
@@ -43,12 +50,72 @@ program
     if (command.opts().quiet) {
       logger.setQuiet()
     }
+    resolvedPath = resolve(command.opts().directory)
+  })
+
+const selectEnv = async (env: string) => {
+  logger.info(`Setting environment to ${env}`)
+
+  const configuration = await getPlatformConfiguration(resolvedPath)
+  if (!configuration) {
+    logger.info('No platform configuration found')
+    return
+  }
+  const promises: Promise<unknown>[] = []
+  for (const level of configuration.levels) {
+    for (const workspace of level) {
+      const provider = getProvider(workspace.provider)
+      if (!provider) {
+        throw new Error(`Provider ${workspace.provider} not found`)
+      }
+      logger.info(`Selecting environment for ${workspace.rootPath}`)
+      promises.push(provider.selectEnvironment(workspace, env))
+    }
+  }
+  await Promise.all(promises)
+  await writeInternalState(resolvedPath, { current_environment: env })
+  logger.info('Environment selected successfully')
+}
+
+const resolveSelectedEnvironment = async (path: string, userSelectedEnv: string | null): Promise<string> => {
+  const state = await readInternalState(path)
+  const stateEnv = state?.current_environment
+  if (userSelectedEnv) {
+    if (userSelectedEnv !== stateEnv) {
+      await selectEnv(userSelectedEnv)
+      await writeInternalState(path, { current_environment: userSelectedEnv })
+    }
+    return userSelectedEnv
+  } else if (stateEnv) {
+    return stateEnv
+  }
+  throw new Error('No environment selected. Please select an environment or provide an environment with --env')
+}
+
+const envCommand = program.command('env')
+envCommand
+  .command('select')
+  .argument('env', 'Environment to select')
+  .description('Select the environment to use')
+  .action(selectEnv)
+
+envCommand
+  .command('current')
+  .description('Show the current environment')
+  .action(async () => {
+    const state = await readInternalState(resolvedPath)
+    const stateEnv = state?.current_environment
+    if (stateEnv) {
+      process.stdout.write(`${stateEnv}\n`)
+    } else {
+      logger.error('No environment selected')
+      process.exit(1)
+    }
   })
 
 program
   .command('apply')
   .description('Apply the platform configuration for a directory interactively')
-  .argument('[directory]', 'Directory to apply (defaults to current directory)', '.')
   .option('-f, --format <format>', 'Format the plan', 'default')
   .option('-i, --integration <integration>', 'Integration to use', 'cli')
   .option('-a, --approve <level_index>', 'Approve the plan for a specific level', (value) => {
@@ -58,13 +125,19 @@ program
     }
     return parsedValue
   })
-  .option('-e, --env <env>', 'environment to apply', 'dev')
+  .option('-e, --env <env>', 'environment to apply. If provided, the environment will be selected before applying')
   .action(
-    async (
-      directory: string,
-      { format, integration, approve, env }: { format?: string; integration?: string; approve?: number; env: string },
-    ) => {
-      const resolvedPath = resolve(directory)
+    async ({
+      format,
+      integration,
+      approve,
+      env,
+    }: {
+      format?: string
+      integration?: string
+      approve?: number
+      env: string
+    }) => {
       logger.info(`Applying platform configuration in: ${resolvedPath}`)
 
       const configuration = await getPlatformConfiguration(resolvedPath)
@@ -73,6 +146,8 @@ program
         return
       }
       const outputsCache: Map<string, ProviderOutput> = new Map()
+
+      env = await resolveSelectedEnvironment(resolvedPath, env)
 
       for (let levelIndex = 0; levelIndex < configuration.levels.length; levelIndex++) {
         const level = configuration.levels[levelIndex]
@@ -88,7 +163,7 @@ program
         }> = []
 
         for (const workspace of level) {
-          const provider = await getProvider(workspace.provider)
+          const provider = getProvider(workspace.provider)
           if (!provider) {
             throw new Error(`Provider ${workspace.provider} not found`)
           }
@@ -217,7 +292,6 @@ program
 program
   .command('destroy')
   .description('Destroy the platform configuration for a directory interactively')
-  .argument('[directory]', 'Directory to destroy (defaults to current directory)', '.')
   .option('-f, --format <format>', 'Format the plan', 'default')
   .option('-i, --integration <integration>', 'Integration to use', 'cli')
   .option('-a, --approve <level_index>', 'Approve the plan for a specific level', (value) => {
@@ -227,13 +301,19 @@ program
     }
     return parsedValue
   })
-  .option('-e, --env <env>', 'environment to destroy', 'dev')
+  .option('-e, --env <env>', 'environment to apply. If provided, the environment will be selected before applying')
   .action(
-    async (
-      directory: string,
-      { format, integration, approve, env }: { format?: string; integration?: string; approve?: number; env: string },
-    ) => {
-      const resolvedPath = resolve(directory)
+    async ({
+      format,
+      integration,
+      approve,
+      env,
+    }: {
+      format?: string
+      integration?: string
+      approve?: number
+      env: string
+    }) => {
       logger.info(`Destroying platform configuration in: ${resolvedPath}`)
 
       const configuration = await getPlatformConfiguration(resolvedPath)
@@ -241,6 +321,8 @@ program
         logger.info('No platform configuration found')
         return
       }
+
+      env = await resolveSelectedEnvironment(resolvedPath, env)
 
       // First, collect all outputs from existing infrastructure
       const outputsCache: Map<string, ProviderOutput> = new Map()
@@ -397,12 +479,9 @@ program
 program
   .command('show')
   .description('Parse and show platform configuration for a directory')
-  .argument('[directory]', 'Directory to analyze (defaults to current directory)', '.')
   .option('-j, --json', 'Output in JSON format')
-  .option('-v, --verbose', 'Show detailed information')
-  .action(async (directory: string, options: { json?: boolean; verbose?: boolean }) => {
+  .action(async (options: { json?: boolean }) => {
     try {
-      const resolvedPath = resolve(directory)
       logger.info(`Analyzing platform configuration in: ${resolvedPath}`)
 
       const result = await getPlatformConfiguration(resolvedPath)
@@ -414,7 +493,7 @@ program
       if (options.json) {
         logger.info(JSON.stringify(result, null, 2))
       } else {
-        displayPlatformInfo(result, options.verbose)
+        displayPlatformInfo(result)
       }
     } catch (error) {
       console.error('Error:', error instanceof Error ? error.message : error)
@@ -422,7 +501,7 @@ program
     }
   })
 
-function displayPlatformInfo(result: PlatformDetectionResult, verbose: boolean = false) {
+function displayPlatformInfo(result: PlatformDetectionResult) {
   logger.info('\n📋 Platform Configuration Summary')
   logger.info('=====================================')
 
@@ -442,10 +521,8 @@ function displayPlatformInfo(result: PlatformDetectionResult, verbose: boolean =
     })
   }
 
-  if (verbose) {
-    logger.info('\n🔍 Detailed Information:')
-    logger.info(JSON.stringify(result, null, 2))
-  }
+  logger.debug('\n🔍 Detailed Information:')
+  logger.debug(JSON.stringify(result, null, 2))
 }
 
 program.parse()

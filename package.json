@@ -16,8 +16,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "ts:check": "pnpm -r ts:check",
-    "interactive-apply": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts interactive-apply ./examples/terraform_and_pulumi/",
-    "interactive-destroy": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts interactive-destroy ./examples/terraform_and_pulumi/"
+    "apply": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts apply -d ./examples/terraform_and_pulumi/",
+    "destroy": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts destroy -d ./examples/terraform_and_pulumi/",
+    "ig-example": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts -d ./examples/terraform_and_pulumi/"
   },
   "keywords": [],
   "author": "",

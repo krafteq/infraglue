@@ -18,16 +18,11 @@ class PulumiProvider implements IProvider {
 
   async getPlan(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
       await this.setPulumiConfig(configuration, input, env)
 
       const options = this.getDefaultExecOptions(configuration, env)
       const { stdout } = await execAsync(`pulumi preview --stack ${env} --json --diff`, options)
 
-      // Map Pulumi output to common ProviderPlan structure
       return this.mapPulumiOutputToProviderPlan(stdout, basename(configuration.rootPath))
     } catch (error) {
       if (error instanceof Error) {
@@ -42,11 +37,6 @@ class PulumiProvider implements IProvider {
 
   async apply(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderOutput> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
-      // Set Pulumi configuration values from input
       await this.setPulumiConfig(configuration, input, env)
 
       const options = this.getDefaultExecOptions(configuration, env)
@@ -75,10 +65,6 @@ class PulumiProvider implements IProvider {
 
   async getOutputs(configuration: ProviderConfig, env: string): Promise<ProviderOutput> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
       const options = this.getDefaultExecOptions(configuration, env)
       const { stdout: outputStdout } = await execAsync(`pulumi stack output --json`, options)
 
@@ -99,10 +85,6 @@ class PulumiProvider implements IProvider {
 
   async destroyPlan(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
       await this.setPulumiConfig(configuration, input, env)
 
       const options = this.getDefaultExecOptions(configuration, env)
@@ -123,10 +105,6 @@ class PulumiProvider implements IProvider {
 
   async destroy(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<void> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
       await this.setPulumiConfig(configuration, input, env)
 
       const options = this.getDefaultExecOptions(configuration, env)
@@ -144,10 +122,6 @@ class PulumiProvider implements IProvider {
 
   async isDestroyed(configuration: ProviderConfig, env: string): Promise<boolean> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
       const options = this.getDefaultExecOptions(configuration, env)
       const { stdout } = await execAsync(`pulumi stack ls --json`, options)
       const stacks = JSON.parse(stdout) as Array<{ name: string }>
@@ -167,6 +141,11 @@ class PulumiProvider implements IProvider {
       }
       throw error
     }
+  }
+
+  async selectEnvironment(configuration: ProviderConfig, env: string): Promise<void> {
+    await this.checkPulumiInstallation()
+    await this.initializePulumi(configuration, env)
   }
 
   async existsInFolder(folderPath: string): Promise<boolean> {
