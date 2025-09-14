@@ -18,22 +18,17 @@ class PulumiProvider implements IProvider {
 
   async getPlan(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
       await this.setPulumiConfig(configuration, input, env)
 
       const options = this.getDefaultExecOptions(configuration, env)
       const { stdout } = await execAsync(`pulumi preview --stack ${env} --json --diff`, options)
 
-      // Map Pulumi output to common ProviderPlan structure
       return this.mapPulumiOutputToProviderPlan(stdout, basename(configuration.rootPath))
     } catch (error) {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string }
         throw new Error(
-          `Pulumi preview failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}`,
+          `Pulumi preview failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}`,
         )
       }
       throw error
@@ -42,11 +37,6 @@ class PulumiProvider implements IProvider {
 
   async apply(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderOutput> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
-      // Set Pulumi configuration values from input
       await this.setPulumiConfig(configuration, input, env)
 
       const options = this.getDefaultExecOptions(configuration, env)
@@ -66,7 +56,7 @@ class PulumiProvider implements IProvider {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string; stdout?: string }
         throw new Error(
-          `Pulumi up failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
+          `Pulumi up failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
         )
       }
       throw error
@@ -75,10 +65,6 @@ class PulumiProvider implements IProvider {
 
   async getOutputs(configuration: ProviderConfig, env: string): Promise<ProviderOutput> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
       const options = this.getDefaultExecOptions(configuration, env)
       const { stdout: outputStdout } = await execAsync(`pulumi stack output --json`, options)
 
@@ -90,7 +76,7 @@ class PulumiProvider implements IProvider {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string; stdout?: string }
         throw new Error(
-          `Pulumi up failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
+          `Pulumi output failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
         )
       }
       throw error
@@ -99,10 +85,6 @@ class PulumiProvider implements IProvider {
 
   async destroyPlan(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
       await this.setPulumiConfig(configuration, input, env)
 
       const options = this.getDefaultExecOptions(configuration, env)
@@ -114,7 +96,7 @@ class PulumiProvider implements IProvider {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string }
         throw new Error(
-          `Pulumi destroy preview failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}`,
+          `Pulumi destroy preview failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}`,
         )
       }
       throw error
@@ -123,10 +105,6 @@ class PulumiProvider implements IProvider {
 
   async destroy(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<void> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
       await this.setPulumiConfig(configuration, input, env)
 
       const options = this.getDefaultExecOptions(configuration, env)
@@ -135,7 +113,7 @@ class PulumiProvider implements IProvider {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string }
         throw new Error(
-          `Pulumi destroy preview failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}`,
+          `Pulumi destroy preview failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}`,
         )
       }
       throw error
@@ -144,10 +122,6 @@ class PulumiProvider implements IProvider {
 
   async isDestroyed(configuration: ProviderConfig, env: string): Promise<boolean> {
     try {
-      await this.checkPulumiInstallation()
-
-      await this.initializePulumi(configuration, env)
-
       const options = this.getDefaultExecOptions(configuration, env)
       const { stdout } = await execAsync(`pulumi stack ls --json`, options)
       const stacks = JSON.parse(stdout) as Array<{ name: string }>
@@ -162,11 +136,16 @@ class PulumiProvider implements IProvider {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string }
         throw new Error(
-          `Pulumi destroy preview failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}`,
+          `Pulumi destroy preview failed in ${configuration.alias}: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}`,
         )
       }
       throw error
     }
+  }
+
+  async selectEnvironment(configuration: ProviderConfig, env: string): Promise<void> {
+    await this.checkPulumiInstallation()
+    await this.initializePulumi(configuration, env)
   }
 
   async existsInFolder(folderPath: string): Promise<boolean> {
@@ -309,7 +288,9 @@ class PulumiProvider implements IProvider {
         }
       }
     } catch (error) {
-      throw new Error(`Failed to initialize Pulumi: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      throw new Error(
+        `Failed to initialize Pulumi in ${configuration.alias}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      )
     }
   }
 
@@ -322,7 +303,9 @@ class PulumiProvider implements IProvider {
         await execAsync(`pulumi config set ${key} ${value}`, options)
       }
     } catch (error) {
-      throw new Error(`Failed to set Pulumi config: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      throw new Error(
+        `Failed to set Pulumi config in ${configuration.alias}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      )
     }
   }
 

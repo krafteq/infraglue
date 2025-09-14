@@ -1,18 +1,5 @@
-/**
- * PlatformDetector class for detecting and managing platform configurations.
- *
- * @example
- * import { PlatformDetector } from '@infra-glue/provider-core'
- *
- * const detector = new PlatformDetector()
- * const result = await detector.detectPlatform('/path/to/project')
- *
- * console.log('Workspaces found:', result.workspaces.size)
- * console.log('Execution order:', result.levels)
- */
-
 import { readFile } from 'fs'
-import { join } from 'path'
+import { join, relative } from 'path'
 import { parse as parseYaml } from 'yaml'
 import { promisify } from 'util'
 import { glob } from 'glob'
@@ -38,6 +25,7 @@ export interface PlatformConfig {
   output?: Record<string, string>
   depends_on?: string[]
   envs?: Record<string, EnvironmentConfig>
+  alias?: string
   [key: string]: unknown
 }
 
@@ -59,25 +47,31 @@ export interface ProviderConfig {
   injections: Record<string, PlatformInjection>
   depends_on?: string[]
   envs: Record<string, EnvironmentConfig> | undefined
+  alias: string
 }
 
-const CONFIG_FILE_NAME = 'platform-config.yaml'
+const CONFIG_FILE_NAMES = ['platform-config.yaml', 'platform-config.yml']
 const DEFAULT_ENCODING = 'utf-8'
 
-async function readConfigFile(fileName: string): Promise<PlatformConfig> {
-  const content = await readFileAsync(fileName, DEFAULT_ENCODING)
-  return parseYaml(content) as PlatformConfig
+async function readConfigFile(dirPath: string): Promise<PlatformConfig | null> {
+  for (const candidate of CONFIG_FILE_NAMES) {
+    try {
+      const content = await readFileAsync(join(dirPath, candidate), DEFAULT_ENCODING)
+      return parseYaml(content) as PlatformConfig
+    } catch (error) {
+      if (!(error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT')) {
+        throw new Error(`Error reading config file ${join(dirPath, candidate)}: ${error}`)
+      }
+    }
+  }
+  return null
 }
 
 export async function getPlatformConfiguration(rootPath: string = process.cwd()): Promise<PlatformDetectionResult> {
-  const fileName = join(rootPath, CONFIG_FILE_NAME)
-  let config: PlatformConfig
-  try {
-    config = await readConfigFile(fileName)
-  } catch (error) {
-    throw new Error(`Error reading config file ${fileName}: ${error}`)
+  const config = await readConfigFile(rootPath)
+  if (!config) {
+    throw new Error(`No config file found in ${rootPath}. Tried ${CONFIG_FILE_NAMES.join(', ')}`)
   }
-
   const workspaces = await readWorkspaces(config, rootPath)
   const result: PlatformDetectionResult = {
     workspaces,
@@ -110,16 +104,7 @@ async function detectProvider(path: string): Promise<string | null> {
 }
 
 async function getWorkspaceConfiguration(path: string): Promise<ProviderConfig> {
-  let config: PlatformConfig | null
-  try {
-    config = await readConfigFile(join(path, CONFIG_FILE_NAME))
-  } catch (error) {
-    if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
-      config = null
-    } else {
-      throw new Error(`Error reading config file ${join(path, CONFIG_FILE_NAME)}: ${error}`)
-    }
-  }
+  const config = await readConfigFile(path)
   const provider = config?.provider || (await detectProvider(path))
   if (!provider) {
     throw new Error(`No provider found in ${path}`)
@@ -135,6 +120,7 @@ async function getWorkspaceConfiguration(path: string): Promise<ProviderConfig> 
     ),
     depends_on: (config?.depends_on || []).map((dependency) => join(path, dependency)),
     envs: config?.envs,
+    alias: config?.alias || '',
   }
 }
 
@@ -155,7 +141,11 @@ async function readWorkspaces(rootConfig: PlatformConfig, rootPath: string): Pro
   return Object.fromEntries(
     (await Promise.all(workspacePaths.flat().map(getWorkspaceConfiguration))).map((config, index) => [
       workspacePaths.flat()[index],
-      { ...config, envs: config.envs || rootConfig.envs },
+      {
+        ...config,
+        envs: config.envs || rootConfig.envs,
+        alias: config.alias || relative(rootPath, config.rootPath),
+      },
     ]),
   )
 }

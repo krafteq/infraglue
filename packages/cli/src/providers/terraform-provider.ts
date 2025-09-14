@@ -6,6 +6,7 @@ import type { ProviderConfig } from '../core/index.js'
 import type { IProvider } from './provider.js'
 import type { ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary } from './provider-plan.js'
+import { saveTemporalFile } from '../core/state-manager'
 
 const execAsync = promisify(exec)
 
@@ -15,149 +16,55 @@ class TerraformProvider implements IProvider {
   }
 
   async getPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
-    try {
-      await this.checkTerraformInstallation()
+    const variables = await this.getVariableString(configuration, input, environment)
 
-      await this.initializeTerraform(configuration, environment)
+    const stdout = await this.execCommand(`terraform plan --json ${variables}`, configuration)
 
-      const variables = this.getVariableString(configuration, input, environment)
-
-      const { stdout } = await execAsync(`terraform plan --json ${variables}`, {
-        cwd: configuration.rootPath,
-      })
-
-      // Map Terraform output to common ProviderPlan structure
-      return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
-    } catch (error) {
-      if (error instanceof Error) {
-        const err = error as Error & { code?: number; stderr?: string; stdout?: string }
-        throw new Error(
-          `Terraform plan failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
-        )
-      }
-      throw error
-    }
+    return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
   }
 
   async apply(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderOutput> {
-    try {
-      await this.checkTerraformInstallation()
+    const variables = await this.getVariableString(configuration, input, environment)
 
-      await this.initializeTerraform(configuration, environment)
+    await this.execCommand(`terraform apply --auto-approve --json ${variables}`, configuration)
 
-      const variables = this.getVariableString(configuration, input, environment)
+    const stdout = await this.execCommand(`terraform output --json`, configuration)
 
-      await execAsync(`terraform apply --auto-approve --json ${variables}`, {
-        cwd: configuration.rootPath,
-      })
+    const outputs = JSON.parse(stdout) as Record<string, { value: string }>
 
-      const { stdout: outputStdout } = await execAsync(`terraform output --json`, {
-        cwd: configuration.rootPath,
-      })
-
-      const outputs = JSON.parse(outputStdout) as Record<string, { value: string }>
-
-      return Object.fromEntries(Object.entries(outputs).map(([key, value]) => [key, value.value]))
-    } catch (error) {
-      if (error instanceof Error) {
-        const err = error as Error & { code?: number; stderr?: string; stdout?: string }
-        throw new Error(
-          `Terraform apply failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
-        )
-      }
-      throw error
-    }
+    return Object.fromEntries(Object.entries(outputs).map(([key, value]) => [key, value.value]))
   }
 
-  async getOutputs(configuration: ProviderConfig, env: string): Promise<ProviderOutput> {
-    try {
-      await this.checkTerraformInstallation()
+  async getOutputs(configuration: ProviderConfig): Promise<ProviderOutput> {
+    const stdout = await this.execCommand(`terraform output --json`, configuration)
+    const outputs = JSON.parse(stdout) as Record<string, { value: string }>
 
-      await this.initializeTerraform(configuration, env)
-
-      const { stdout: outputStdout } = await execAsync(`terraform output --json`, {
-        cwd: configuration.rootPath,
-      })
-      const outputs = JSON.parse(outputStdout) as Record<string, { value: string }>
-
-      return Object.fromEntries(Object.entries(outputs).map(([key, value]) => [key, value.value]))
-    } catch (error) {
-      if (error instanceof Error) {
-        const err = error as Error & { code?: number; stderr?: string; stdout?: string }
-        throw new Error(
-          `Terraform output failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
-        )
-      }
-      throw error
-    }
+    return Object.fromEntries(Object.entries(outputs).map(([key, value]) => [key, value.value]))
   }
 
   async destroyPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
-    try {
-      await this.checkTerraformInstallation()
+    const variables = await this.getVariableString(configuration, input, environment)
 
-      await this.initializeTerraform(configuration, environment)
+    const stdout = await this.execCommand(`terraform plan -destroy --json ${variables}`, configuration)
 
-      const variables = this.getVariableString(configuration, input, environment)
-
-      const { stdout } = await execAsync(`terraform plan -destroy --json ${variables}`, {
-        cwd: configuration.rootPath,
-      })
-
-      // Map Terraform output to common ProviderPlan structure
-      return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
-    } catch (error) {
-      if (error instanceof Error) {
-        const err = error as Error & { code?: number; stderr?: string; stdout?: string }
-        throw new Error(
-          `Terraform destroy preview failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
-        )
-      }
-      throw error
-    }
+    return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
   }
 
   async destroy(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<void> {
-    try {
-      await this.checkTerraformInstallation()
+    const variables = await this.getVariableString(configuration, input, environment)
 
-      await this.initializeTerraform(configuration, environment)
-
-      const variables = this.getVariableString(configuration, input, environment)
-
-      await execAsync(`terraform destroy --auto-approve ${variables}`, {
-        cwd: configuration.rootPath,
-      })
-    } catch (error) {
-      if (error instanceof Error) {
-        const err = error as Error & { code?: number; stderr?: string; stdout?: string }
-        throw new Error(
-          `Terraform destroy preview failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
-        )
-      }
-      throw error
-    }
+    await this.execCommand(`terraform destroy --auto-approve ${variables}`, configuration)
   }
 
-  async isDestroyed(configuration: ProviderConfig, environment: string): Promise<boolean> {
-    try {
-      await this.checkTerraformInstallation()
+  async isDestroyed(configuration: ProviderConfig): Promise<boolean> {
+    const stdout = await this.execCommand(`terraform state list`, configuration, false)
+    return stdout.trim() === ''
+  }
 
-      await this.initializeTerraform(configuration, environment)
+  async selectEnvironment(configuration: ProviderConfig, env: string): Promise<void> {
+    await this.checkTerraformInstallation()
 
-      const { stdout } = await execAsync(`terraform state list`, {
-        cwd: configuration.rootPath,
-      })
-      return stdout.trim() === ''
-    } catch (error) {
-      if (error instanceof Error) {
-        const err = error as Error & { code?: number; stderr?: string; stdout?: string }
-        throw new Error(
-          `Terraform destroy preview failed: ${error.message}\n  error code: ${err.code}\n error stderr: ${err.stderr}\n error stdout: ${err.stdout}`,
-        )
-      }
-      throw error
-    }
+    await this.initializeTerraform(configuration, env)
   }
 
   async existsInFolder(folderPath: string): Promise<boolean> {
@@ -256,12 +163,14 @@ class TerraformProvider implements IProvider {
       throw new Error('Terraform is not installed or not available in PATH')
     }
   }
+
   private backendConfigToArgs(config?: Record<string, string>): string {
     if (!config) return ''
     return Object.entries(config)
       .map(([k, v]) => `--backend-config="${k}=${v}"`)
       .join(' ')
   }
+
   private async initializeTerraform(configuration: ProviderConfig, environment: string): Promise<void> {
     try {
       const BACKEND_CONFIG_FILE = join(configuration.rootPath, '__ig__backend.tf')
@@ -282,20 +191,65 @@ class TerraformProvider implements IProvider {
         }
       }
       const backendConfigArgs = this.backendConfigToArgs(configuration.envs?.[environment]?.backend_config)
-      // TODO: double check --reconfigure, it could be expensive, mb we need init as a separate step?
-      await execAsync(`terraform init ${backendConfigArgs} --reconfigure`, { cwd: configuration.rootPath })
+      await this.execCommand(`terraform init ${backendConfigArgs} --reconfigure`, configuration, false)
     } catch (error) {
-      throw new Error(`Failed to initialize Terraform: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      throw new Error(`Failed to initialize Terraform in ${configuration.alias}`, { cause: error })
     }
   }
 
-  private getVariableString(configuration: ProviderConfig, input: ProviderInput, environment: string) {
+  private async getVariableString(configuration: ProviderConfig, input: ProviderInput, environment: string) {
     const { var_files, vars } = configuration.envs?.[environment] || { vars: {}, var_files: [] }
     const variables = Object.entries({ ...vars, ...input }) // TODO: what is more important? or maybe error in case of collision?
-      .map(([key, value]) => `-var "${key}=${value}"`)
-      .join(' ')
+      .map(([key, value]) => `${key}="${value}"`)
+      .join('\n')
+    const tempVarFile = await saveTemporalFile(configuration.rootPath, 'terraform-vars.tfvars', variables)
     const filesStr = var_files?.map((f) => `-var-file=${f}`)?.join(' ') || ''
-    return [filesStr, variables].join(' ')
+    return `${filesStr} -var-file=${tempVarFile}`
+  }
+
+  private async execCommand(
+    command: string,
+    configuration: ProviderConfig,
+    expectedJson: boolean = true,
+  ): Promise<string> {
+    try {
+      const { stdout } = await execAsync(command, {
+        cwd: configuration.rootPath,
+      })
+
+      return stdout
+    } catch (error) {
+      if (error instanceof Error) {
+        const err = error as Error & { code?: number; stderr?: string; stdout?: string }
+        const messageParts = [
+          `Terraform command failed in ${configuration.alias}:`,
+          `Command: ${command}`,
+          `Error message: ${error.message}`,
+          `Error code: ${err.code}`,
+          `Error stderr: ${err.stderr}`,
+          `Error stdout: ${expectedJson && err.stdout ? this.tryParseJsonStdout(err.stdout) : err.stdout}`,
+        ]
+        throw new Error(messageParts.join('\n\t'))
+      }
+      throw error
+    }
+  }
+  private tryParseJsonStdout(stdout: string): string {
+    try {
+      const parsed = stdout
+        .split('\n')
+        .filter((line) => line.trim() !== '')
+        .map((line) => JSON.parse(line) as { '@message': string; diagnostic?: { summary: string; detail?: string } })
+
+      return parsed
+        .map(
+          (x) =>
+            `${x['@message']}${x.diagnostic?.summary ? `\n\t\t\t${x.diagnostic.summary}` : ''}${x.diagnostic?.detail ? `\n\t\t\t${x.diagnostic.detail}` : ''}`,
+        )
+        .join('\n\t\t')
+    } catch {
+      return stdout
+    }
   }
 }
 

@@ -15,5 +15,7 @@ export interface IProvider {
   destroy(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<void>
   isDestroyed(configuration: ProviderConfig, env: string): Promise<boolean>
 
+  selectEnvironment(configuration: ProviderConfig, env: string): Promise<void>
+
   existsInFolder(folderPath: string): Promise<boolean>
 }
