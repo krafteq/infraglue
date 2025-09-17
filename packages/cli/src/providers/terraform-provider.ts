@@ -6,7 +6,7 @@ import type { ProviderConfig } from '../core/index.js'
 import type { IProvider } from './provider.js'
 import type { ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary } from './provider-plan.js'
-import { saveTemporalFile } from '../core/state-manager'
+import { saveTemporalFile } from '../core/state-manager.js'
 
 const execAsync = promisify(exec)
 

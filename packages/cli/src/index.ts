@@ -16,7 +16,7 @@ import {
 import { getFormatter } from './formatters/index.js'
 import { getIntegration } from './integrations/index.js'
 import { logger } from './utils/logger.js'
-import { readInternalState, writeInternalState } from './core/state-manager'
+import { readInternalState, writeInternalState } from './core/state-manager.js'
 
 const readFileAsync = promisify(readFile)
 
