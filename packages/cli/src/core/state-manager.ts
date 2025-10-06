@@ -1,4 +1,4 @@
-import { join } from 'path'
+import { join, relative } from 'path'
 import { readFile, writeFile, mkdir, rm } from 'fs/promises'
 
 export interface IState {
@@ -30,11 +30,18 @@ export async function writeInternalState(projectPath: string, state: IState): Pr
   await writeFile(stateFilePath, content, STATE_FILE_ENCODING)
 }
 
-export async function saveTemporalFile(projectPath: string, fileName: string, content: string): Promise<string> {
-  const filePath = join(projectPath, STATE_FILE_DIR, TEMPORAL_FILE_DIR, fileName)
-  await mkdir(join(projectPath, STATE_FILE_DIR, TEMPORAL_FILE_DIR), { recursive: true })
+export async function saveTemporalFile(
+  rootMonoRepoPath: string,
+  projectPath: string,
+  fileName: string,
+  content: string,
+): Promise<string> {
+  const relativePath = relative(rootMonoRepoPath, projectPath)
+  const folderPath = join(rootMonoRepoPath, STATE_FILE_DIR, TEMPORAL_FILE_DIR, relativePath)
+  await mkdir(folderPath, { recursive: true })
+  const filePath = join(folderPath, fileName)
   await writeFile(filePath, content, STATE_FILE_ENCODING)
-  return join(STATE_FILE_DIR, TEMPORAL_FILE_DIR, fileName)
+  return relative(projectPath, filePath)
 }
 
 export async function removeTemporalFile(projectPath: string, fileName: string): Promise<void> {

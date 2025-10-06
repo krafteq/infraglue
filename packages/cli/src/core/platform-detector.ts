@@ -42,6 +42,7 @@ export interface PlatformDetectionResult {
 }
 
 export interface ProviderConfig {
+  rootMonoRepoFolder: string
   rootPath: string
   provider: string
   injections: Record<string, PlatformInjection>
@@ -103,13 +104,14 @@ async function detectProvider(path: string): Promise<string | null> {
   return null
 }
 
-async function getWorkspaceConfiguration(path: string): Promise<ProviderConfig> {
+async function getWorkspaceConfiguration(path: string, rootPath: string): Promise<ProviderConfig> {
   const config = await readConfigFile(path)
   const provider = config?.provider || (await detectProvider(path))
   if (!provider) {
     throw new Error(`No provider found in ${path}`)
   }
   return {
+    rootMonoRepoFolder: rootPath,
     rootPath: path,
     provider,
     injections: Object.fromEntries(
@@ -139,14 +141,16 @@ async function readWorkspaces(rootConfig: PlatformConfig, rootPath: string): Pro
   )
 
   return Object.fromEntries(
-    (await Promise.all(workspacePaths.flat().map(getWorkspaceConfiguration))).map((config, index) => [
-      workspacePaths.flat()[index],
-      {
-        ...config,
-        envs: config.envs || rootConfig.envs,
-        alias: config.alias || relative(rootPath, config.rootPath),
-      },
-    ]),
+    (await Promise.all(workspacePaths.flat().map((path) => getWorkspaceConfiguration(path, rootPath)))).map(
+      (config, index) => [
+        workspacePaths.flat()[index],
+        {
+          ...config,
+          envs: config.envs || rootConfig.envs,
+          alias: config.alias || relative(rootPath, config.rootPath),
+        },
+      ],
+    ),
   )
 }
 

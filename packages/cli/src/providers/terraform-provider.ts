@@ -202,7 +202,12 @@ class TerraformProvider implements IProvider {
     const variables = Object.entries({ ...vars, ...input }) // TODO: what is more important? or maybe error in case of collision?
       .map(([key, value]) => `${key}="${value}"`)
       .join('\n')
-    const tempVarFile = await saveTemporalFile(configuration.rootPath, 'terraform-vars.tfvars', variables)
+    const tempVarFile = await saveTemporalFile(
+      configuration.rootMonoRepoFolder,
+      configuration.rootPath,
+      'terraform-vars.tfvars',
+      variables,
+    )
     const filesStr = var_files?.map((f) => `-var-file=${f}`)?.join(' ') || ''
     return `${filesStr} -var-file=${tempVarFile}`
   }
