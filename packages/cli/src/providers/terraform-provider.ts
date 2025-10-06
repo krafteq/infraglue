@@ -5,7 +5,7 @@ import { readdir, copyFile, rm, access, constants, writeFile } from 'fs/promises
 import type { ProviderConfig } from '../core/index.js'
 import type { IProvider } from './provider.js'
 import type { ProviderInput, ProviderOutput } from './provider.js'
-import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary } from './provider-plan.js'
+import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provider-plan.js'
 import { saveTemporalFile } from '../core/state-manager.js'
 
 const execAsync = promisify(exec)
@@ -84,11 +84,12 @@ class TerraformProvider implements IProvider {
     const resourceChanges: Array<ResourceChange> = []
     const outputs: Array<Output> = []
     const diagnostics: Array<Diagnostic> = []
-    let changeSummary: ChangeSummary = {
+    let changeSummary = {
       add: 0,
       change: 0,
       remove: 0,
       replace: 0,
+      outputUpdates: 0,
     }
 
     // Parse the JSON lines from Terraform output
@@ -114,13 +115,25 @@ class TerraformProvider implements IProvider {
 
       if (obj.type === 'outputs') {
         for (const [name, output] of Object.entries(obj.outputs)) {
-          const terraformOutput = output as { value?: string; sensitive?: boolean }
-          outputs.push({
+          const terraformOutput = output as { value?: string; sensitive?: boolean; action?: string }
+          const o: Output = {
             name,
             value: terraformOutput.value || 'TO_BE_DEFINED',
             sensitive: terraformOutput.sensitive || false,
             description: null,
-          })
+            action:
+              terraformOutput.action === 'create'
+                ? 'added'
+                : terraformOutput.action === 'update'
+                  ? 'updated'
+                  : terraformOutput.action === 'delete'
+                    ? 'deleted'
+                    : undefined,
+          }
+          outputs.push(o)
+          if (o.action) {
+            changeSummary.outputUpdates++
+          }
         }
       }
 
@@ -130,6 +143,7 @@ class TerraformProvider implements IProvider {
           change: obj.changes.change || 0,
           remove: obj.changes.remove || 0,
           replace: obj.changes.replace || 0,
+          outputUpdates: changeSummary.outputUpdates || 0,
         }
       }
 

@@ -170,6 +170,7 @@ class PulumiProvider implements IProvider {
       change: 0,
       remove: 0,
       replace: 0,
+      outputUpdates: 0,
     }
 
     const previewResult = JSON.parse(pulumiOutput)
@@ -192,6 +193,7 @@ class PulumiProvider implements IProvider {
               change: changeSummary.change,
               remove: changeSummary.remove,
               replace: changeSummary.replace,
+              outputUpdates: 0,
             }
             break
           case 'update':
@@ -201,6 +203,7 @@ class PulumiProvider implements IProvider {
               change: changeSummary.change + 1,
               remove: changeSummary.remove,
               replace: changeSummary.replace,
+              outputUpdates: 0,
             }
             break
           case 'delete':
@@ -210,6 +213,7 @@ class PulumiProvider implements IProvider {
               change: changeSummary.change,
               remove: changeSummary.remove + 1,
               replace: changeSummary.replace,
+              outputUpdates: 0,
             }
             break
           case 'replace':
@@ -219,6 +223,7 @@ class PulumiProvider implements IProvider {
               change: changeSummary.change,
               remove: changeSummary.remove,
               replace: changeSummary.replace + 1,
+              outputUpdates: 0,
             }
             break
           case 'same':

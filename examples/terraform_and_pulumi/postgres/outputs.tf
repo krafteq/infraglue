@@ -31,7 +31,7 @@ output "database_user" {
 output "external_port" {
   description = "External port for database access"
   value       = var.external_port
-} 
+}
 
 output "database_password" {
   description = "Database password"

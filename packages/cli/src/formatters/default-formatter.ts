@@ -1,4 +1,4 @@
-import type { ProviderPlan, ResourceChange, Diagnostic, ChangeSummary } from '../providers/provider-plan.js'
+import type { ProviderPlan, ResourceChange, Diagnostic, ChangeSummary, Output } from '../providers/provider-plan.js'
 
 // TODO: refactor this.
 
@@ -66,6 +66,7 @@ export class DefaultFormatter {
     const effectiveExitCode = hasErrors ? exitCode || 1 : 0
 
     const resources = this.formatResources(plan.resourceChanges)
+    const outputs = this.formatOutputs(plan.outputs)
     const table = this.buildTable(resources)
     const diagnostics =
       includeDiagnostics && effectiveExitCode !== 0 ? `\n\nDiagnostics:\n${this.formatErrors(plan.diagnostics)}` : ''
@@ -82,6 +83,10 @@ export class DefaultFormatter {
       if (collapsible) {
         formattedContent = this.wrapAsCollapsibleSection(header, formattedContent)
       }
+    }
+
+    if (outputs) {
+      formattedContent += `\n\nOutputs:\n${outputs}`
     }
 
     const workspacesPlan = plan.workspacesPlan ? this.formatWorkspaces(plan.workspacesPlan, { collapsible }) : null
@@ -122,6 +127,16 @@ export class DefaultFormatter {
    */
   private static hasChanges(summary: ChangeSummary): boolean {
     return summary.add > 0 || summary.change > 0 || summary.remove > 0 || summary.replace > 0
+  }
+
+  private static formatOutputs(outputs: Output[]): string {
+    return outputs
+      .filter((output) => output.action)
+      .map((output) => {
+        const outputText = output.sensitive ? '***' : output.value
+        return `  [${output.action}] ${output.name}: ${outputText}`
+      })
+      .join('\n')
   }
 
   /**

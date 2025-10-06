@@ -12,6 +12,7 @@ import {
   type ProviderInput,
   type ProviderPlan,
   getProvider,
+  hasChanges,
 } from './providers/index.js'
 import { getFormatter } from './formatters/index.js'
 import { getIntegration } from './integrations/index.js'
@@ -204,15 +205,7 @@ program
           }
 
           const plan = await provider.getPlan(workspace, inputs, env)
-          if (
-            plan.resourceChanges.length === 0 ||
-            !(
-              plan.changeSummary.add > 0 ||
-              plan.changeSummary.change > 0 ||
-              plan.changeSummary.remove > 0 ||
-              plan.changeSummary.replace > 0
-            )
-          ) {
+          if (!hasChanges(plan)) {
             const outputs = await provider.getOutputs(workspace, env)
             logger.info(`✅ ${workspace.alias} is up to date. Outputs: ${JSON.stringify(outputs, null, 2)}`)
             outputsCache.set(workspace.rootPath, outputs)
@@ -237,20 +230,22 @@ program
         let totalChange = 0
         let totalRemove = 0
         let totalReplace = 0
+        let totalOutputChanges = 0
 
         for (const { workspace, plan } of levelPlans) {
           logger.info(`\n🏭 Workspace: ${workspace.alias}`)
           logger.info(
-            `   Add: ${plan.changeSummary.add}, Change: ${plan.changeSummary.change}, Remove: ${plan.changeSummary.remove}, Replace: ${plan.changeSummary.replace}`,
+            `   Add: ${plan.changeSummary.add}, Change: ${plan.changeSummary.change}, Remove: ${plan.changeSummary.remove}, Replace: ${plan.changeSummary.replace}, Outputs: ${plan.changeSummary.outputUpdates}`,
           )
           totalAdd += plan.changeSummary.add
           totalChange += plan.changeSummary.change
           totalRemove += plan.changeSummary.remove
           totalReplace += plan.changeSummary.replace
+          totalOutputChanges += plan.changeSummary.outputUpdates
         }
 
         logger.info(
-          `\n📊 Total Changes: Add: ${totalAdd}, Change: ${totalChange}, Remove: ${totalRemove}, Replace: ${totalReplace}`,
+          `\n📊 Total Changes: Add: ${totalAdd}, Change: ${totalChange}, Remove: ${totalRemove}, Replace: ${totalReplace}, Outputs: ${totalOutputChanges}`,
         )
 
         let message = levelPlans
@@ -423,15 +418,7 @@ program
           }
 
           const plan = await provider.destroyPlan(workspace, inputs, env)
-          if (
-            plan.resourceChanges.length === 0 ||
-            !(
-              plan.changeSummary.add > 0 ||
-              plan.changeSummary.change > 0 ||
-              plan.changeSummary.remove > 0 ||
-              plan.changeSummary.replace > 0
-            )
-          ) {
+          if (!hasChanges(plan)) {
             logger.info(`✅ Nothing to destroy in ${workspace.alias}`)
             continue
           }

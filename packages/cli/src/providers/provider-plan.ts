@@ -48,6 +48,7 @@ export interface ChangeSummary {
   readonly change: number
   readonly remove: number
   readonly replace: number
+  readonly outputUpdates: number
 }
 
 /**
@@ -58,6 +59,7 @@ export interface Output {
   readonly value: string
   readonly sensitive: boolean
   readonly description: string | null
+  readonly action?: 'added' | 'updated' | 'deleted' | undefined
 }
 
 /**
@@ -74,4 +76,14 @@ export interface ProviderPlan {
   readonly diagnostics: Diagnostic[]
   readonly changeSummary: ChangeSummary
   readonly metadata: Record<string, unknown>
+}
+
+export function hasChanges(plan: ProviderPlan) {
+  return (
+    plan.changeSummary.add > 0 ||
+    plan.changeSummary.change > 0 ||
+    plan.changeSummary.remove > 0 ||
+    plan.changeSummary.replace > 0 ||
+    plan.changeSummary.outputUpdates > 0
+  )
 }
