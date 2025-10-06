@@ -7,6 +7,7 @@ import type { ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary, ChangeAction } from './provider-plan.js'
 import type { IProvider } from './provider.js'
 import type { ExecOptions } from 'node:child_process'
+import { logger } from '../utils/logger'
 
 const execAsync = promisify(exec)
 const accessAsync = promisify(access)
@@ -20,8 +21,7 @@ class PulumiProvider implements IProvider {
     try {
       await this.setPulumiConfig(configuration, input, env)
 
-      const options = this.getDefaultExecOptions(configuration, env)
-      const { stdout } = await execAsync(`pulumi preview --stack ${env} --json --diff`, options)
+      const stdout = await this.execCommand(`pulumi preview --stack ${env} --json --diff`, configuration, env)
 
       return this.mapPulumiOutputToProviderPlan(stdout, basename(configuration.rootPath))
     } catch (error) {
@@ -39,10 +39,9 @@ class PulumiProvider implements IProvider {
     try {
       await this.setPulumiConfig(configuration, input, env)
 
-      const options = this.getDefaultExecOptions(configuration, env)
-      await execAsync(`pulumi up --yes --json`, options)
+      await this.execCommand(`pulumi up --yes --json`, configuration, env)
 
-      const { stdout: outputStdout } = await execAsync(`pulumi stack output --json`, options)
+      const outputStdout = await this.execCommand(`pulumi stack output --json`, configuration, env)
 
       const outputs = JSON.parse(outputStdout) as Record<string, { value: unknown }>
 
@@ -65,8 +64,7 @@ class PulumiProvider implements IProvider {
 
   async getOutputs(configuration: ProviderConfig, env: string): Promise<ProviderOutput> {
     try {
-      const options = this.getDefaultExecOptions(configuration, env)
-      const { stdout: outputStdout } = await execAsync(`pulumi stack output --json`, options)
+      const outputStdout = await this.execCommand(`pulumi stack output --json`, configuration, env)
 
       const outputs = JSON.parse(outputStdout) as Record<string, unknown>
       return Object.fromEntries(
@@ -87,8 +85,11 @@ class PulumiProvider implements IProvider {
     try {
       await this.setPulumiConfig(configuration, input, env)
 
-      const options = this.getDefaultExecOptions(configuration, env)
-      const { stdout } = await execAsync(`pulumi destroy --preview-only --stack ${env} --diff --json`, options)
+      const stdout = await this.execCommand(
+        `pulumi destroy --preview-only --stack ${env} --diff --json`,
+        configuration,
+        env,
+      )
 
       // Map Pulumi output to common ProviderPlan structure
       return this.mapPulumiOutputToProviderPlan(stdout, basename(configuration.rootPath))
@@ -107,8 +108,7 @@ class PulumiProvider implements IProvider {
     try {
       await this.setPulumiConfig(configuration, input, env)
 
-      const options = this.getDefaultExecOptions(configuration, env)
-      await execAsync(`pulumi destroy --yes --stack ${env}`, options)
+      await this.execCommand(`pulumi destroy --yes --stack ${env}`, configuration, env)
     } catch (error) {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string }
@@ -122,14 +122,13 @@ class PulumiProvider implements IProvider {
 
   async isDestroyed(configuration: ProviderConfig, env: string): Promise<boolean> {
     try {
-      const options = this.getDefaultExecOptions(configuration, env)
-      const { stdout } = await execAsync(`pulumi stack ls --json`, options)
+      const stdout = await this.execCommand(`pulumi stack ls --json`, configuration, env)
       const stacks = JSON.parse(stdout) as Array<{ name: string }>
       const stackExists = stacks.some((stack) => stack.name === env)
       if (!stackExists) {
         return true
       }
-      const { stdout: stateStdout } = await execAsync(`pulumi stack --stack ${env} export`, options)
+      const stateStdout = await this.execCommand(`pulumi stack --stack ${env} export`, configuration, env)
       const state = JSON.parse(stateStdout) as { deployment: { resources: Array<{ urn: string }> } }
       return !state.deployment.resources || state.deployment.resources.length === 0
     } catch (error) {
@@ -280,14 +279,13 @@ class PulumiProvider implements IProvider {
 
   private async initializePulumi(configuration: ProviderConfig, env: string): Promise<void> {
     try {
-      const options = this.getDefaultExecOptions(configuration, env)
-      await execAsync('pulumi install', options)
+      await this.execCommand('pulumi install', configuration, env)
       try {
-        await execAsync(`pulumi stack select ${env}`, options)
+        await this.execCommand(`pulumi stack select ${env}`, configuration, env)
       } catch (error) {
         if (error instanceof Error && error.message.includes(`no stack named '${env}' found`)) {
-          await execAsync(`pulumi stack init ${env}`, options)
-          await execAsync(`pulumi stack select ${env}`, options)
+          await this.execCommand(`pulumi stack init ${env}`, configuration, env)
+          await this.execCommand(`pulumi stack select ${env}`, configuration, env)
         } else {
           throw error
         }
@@ -302,10 +300,9 @@ class PulumiProvider implements IProvider {
   private async setPulumiConfig(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<void> {
     try {
       const envVars = configuration.envs?.[env]?.vars || {}
-      const options = this.getDefaultExecOptions(configuration, env)
       // TODO: what should have higher priority? input or env?
       for (const [key, value] of Object.entries({ ...envVars, ...input })) {
-        await execAsync(`pulumi config set ${key} ${value}`, options)
+        await this.execCommand(`pulumi config set ${key} ${value}`, configuration, env)
       }
     } catch (error) {
       throw new Error(
@@ -326,6 +323,37 @@ class PulumiProvider implements IProvider {
       }
     }
     return options
+  }
+
+  private async execCommand(command: string, configuration: ProviderConfig, env: string): Promise<string> {
+    try {
+      logger.debug(`[pulumi] exec: ${command}\n  cwd: ${configuration.rootPath}`)
+      const { stdout, stderr } = await execAsync(command, this.getDefaultExecOptions(configuration, env))
+      if (stderr && stderr.trim()) {
+        logger.debug(`[pulumi] stderr:\n${stderr}`)
+      }
+      if (stdout && stdout.trim()) {
+        logger.debug(`[pulumi] stdout (raw):\n${stdout}`)
+      }
+      return stdout
+    } catch (error) {
+      if (error instanceof Error) {
+        const err = error as Error & { code?: number; stderr?: string; stdout?: string }
+        logger.debug(
+          `[pulumi] exec failed: ${command}\n  cwd: ${configuration.rootPath}\n  code: ${err.code}\n  stderr:\n${err.stderr}\n  stdout (raw):\n${err.stdout}`,
+        )
+        const messageParts = [
+          `Pulumi command failed in ${configuration.alias}:`,
+          `Command: ${command}`,
+          `Error message: ${error.message}`,
+          `Error code: ${err.code}`,
+          `Error stderr: ${err.stderr}`,
+          `Error stdout: ${err.stdout}`,
+        ]
+        throw new Error(messageParts.join('\n\t'))
+      }
+      throw error
+    }
   }
 }
 

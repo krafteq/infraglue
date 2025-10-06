@@ -7,6 +7,7 @@ import type { IProvider } from './provider.js'
 import type { ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provider-plan.js'
 import { saveTemporalFile } from '../core/state-manager.js'
+import { logger } from '../utils/logger.js'
 
 const execAsync = promisify(exec)
 
@@ -57,7 +58,7 @@ class TerraformProvider implements IProvider {
   }
 
   async isDestroyed(configuration: ProviderConfig): Promise<boolean> {
-    const stdout = await this.execCommand(`terraform state list`, configuration, false)
+    const stdout = await this.execCommand(`terraform state list`, configuration)
     return stdout.trim() === ''
   }
 
@@ -172,7 +173,11 @@ class TerraformProvider implements IProvider {
 
   private async checkTerraformInstallation(): Promise<void> {
     try {
-      await execAsync('terraform version')
+      const cmd = 'terraform version'
+      logger.debug(`[terraform] exec: ${cmd}`)
+      const { stdout, stderr } = await execAsync(cmd)
+      if (stderr && stderr.trim()) logger.debug(`[terraform] stderr:\n${stderr}`)
+      if (stdout && stdout.trim()) logger.debug(`[terraform] stdout (raw):\n${stdout}`)
     } catch {
       throw new Error('Terraform is not installed or not available in PATH')
     }
@@ -205,7 +210,7 @@ class TerraformProvider implements IProvider {
         }
       }
       const backendConfigArgs = this.backendConfigToArgs(configuration.envs?.[environment]?.backend_config)
-      await this.execCommand(`terraform init ${backendConfigArgs} --reconfigure`, configuration, false)
+      await this.execCommand(`terraform init ${backendConfigArgs} --reconfigure`, configuration)
     } catch (error) {
       throw new Error(`Failed to initialize Terraform in ${configuration.alias}`, { cause: error })
     }
@@ -226,48 +231,36 @@ class TerraformProvider implements IProvider {
     return `${filesStr} -var-file=${tempVarFile}`
   }
 
-  private async execCommand(
-    command: string,
-    configuration: ProviderConfig,
-    expectedJson: boolean = true,
-  ): Promise<string> {
+  private async execCommand(command: string, configuration: ProviderConfig): Promise<string> {
     try {
-      const { stdout } = await execAsync(command, {
+      logger.debug(`[terraform] exec: ${command}\n  cwd: ${configuration.rootPath}`)
+      const { stdout, stderr } = await execAsync(command, {
         cwd: configuration.rootPath,
       })
-
+      if (stderr && stderr.trim()) {
+        logger.debug(`[terraform] stderr:\n${stderr}`)
+      }
+      if (stdout && stdout.trim()) {
+        logger.debug(`[terraform] stdout (raw):\n${stdout}`)
+      }
       return stdout
     } catch (error) {
       if (error instanceof Error) {
         const err = error as Error & { code?: number; stderr?: string; stdout?: string }
+        logger.debug(
+          `[terraform] exec failed: ${command}\n  cwd: ${configuration.rootPath}\n  code: ${err.code}\n  stderr:\n${err.stderr}\n  stdout (raw):\n${err.stdout}`,
+        )
         const messageParts = [
           `Terraform command failed in ${configuration.alias}:`,
           `Command: ${command}`,
           `Error message: ${error.message}`,
           `Error code: ${err.code}`,
           `Error stderr: ${err.stderr}`,
-          `Error stdout: ${expectedJson && err.stdout ? this.tryParseJsonStdout(err.stdout) : err.stdout}`,
+          `Error stdout: ${err.stdout}`,
         ]
         throw new Error(messageParts.join('\n\t'))
       }
       throw error
-    }
-  }
-  private tryParseJsonStdout(stdout: string): string {
-    try {
-      const parsed = stdout
-        .split('\n')
-        .filter((line) => line.trim() !== '')
-        .map((line) => JSON.parse(line) as { '@message': string; diagnostic?: { summary: string; detail?: string } })
-
-      return parsed
-        .map(
-          (x) =>
-            `${x['@message']}${x.diagnostic?.summary ? `\n\t\t\t${x.diagnostic.summary}` : ''}${x.diagnostic?.detail ? `\n\t\t\t${x.diagnostic.detail}` : ''}`,
-        )
-        .join('\n\t\t')
-    } catch {
-      return stdout
     }
   }
 }
