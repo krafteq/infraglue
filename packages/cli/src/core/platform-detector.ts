@@ -51,7 +51,7 @@ export interface ProviderConfig {
   alias: string
 }
 
-const CONFIG_FILE_NAMES = ['platform-config.yaml', 'platform-config.yml']
+const CONFIG_FILE_NAMES = ['ig.yaml', 'ig.yml']
 const DEFAULT_ENCODING = 'utf-8'
 
 async function readConfigFile(dirPath: string): Promise<PlatformConfig | null> {
