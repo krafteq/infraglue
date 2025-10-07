@@ -18,7 +18,8 @@
     "ts:check": "pnpm -r ts:check",
     "apply": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts apply -d ./examples/terraform_and_pulumi/",
     "destroy": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts destroy -d ./examples/terraform_and_pulumi/",
-    "ig-example": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts -d ./examples/terraform_and_pulumi/"
+    "ig-example": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts -d ./examples/terraform_and_pulumi/",
+    "ig-example:postgres": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts -d ./examples/terraform_and_pulumi/postgres/"
   },
   "keywords": [],
   "author": "",

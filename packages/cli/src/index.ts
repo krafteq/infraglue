@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander'
-import { dirname, join, resolve } from 'path'
+import { dirname, join, resolve, sep } from 'path'
 import { readFile } from 'fs'
 import { promisify } from 'util'
 import { getPlatformConfiguration, type PlatformDetectionResult, type ProviderConfig } from './core/index.js'
@@ -28,6 +28,35 @@ export async function getPackageJsonVersion(): Promise<string> {
 
   const packageJson = JSON.parse(await readFileAsync(packageJsonPath, 'utf-8'))
   return packageJson.version
+}
+
+async function resolveRootAndProject(
+  startPath: string,
+): Promise<{ root: string; inferredProject?: string | undefined; configuration: PlatformDetectionResult } | null> {
+  // TODO: extract
+  let current = resolve(startPath)
+  const original = current
+  while (true) {
+    try {
+      const configuration = await getPlatformConfiguration(current)
+      let inferredProject: string | undefined
+      const workspaces = Object.values(configuration.workspaces)
+      for (const ws of workspaces) {
+        const wsPath = resolve(ws.rootPath)
+        if (original.startsWith(wsPath + sep) || original === wsPath) {
+          inferredProject = ws.alias
+          break
+        }
+      }
+      return { root: current, inferredProject, configuration }
+    } catch {
+      /* empty */
+    }
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return null
 }
 
 const program = new Command()
@@ -143,12 +172,16 @@ program
       project?: string
     }) => {
       logger.info(`Applying platform configuration in: ${resolvedPath}`)
-
-      const configuration = await getPlatformConfiguration(resolvedPath)
-      if (!configuration) {
-        logger.info('No platform configuration found')
+      const auto = await resolveRootAndProject(resolvedPath)
+      if (auto && auto.root !== resolvedPath) {
+        logger.info(`Detected platform root at: ${auto.root}`)
+        resolvedPath = auto.root
+        project = project || auto.inferredProject
+      } else if (!auto) {
+        logger.error('No platform configuration found')
         return
       }
+      const configuration = auto.configuration
       const outputsCache: Map<string, ProviderOutput> = new Map()
 
       env = await resolveSelectedEnvironment(resolvedPath, env)
@@ -339,11 +372,16 @@ program
     }) => {
       logger.info(`Destroying platform configuration in: ${resolvedPath}`)
 
-      const configuration = await getPlatformConfiguration(resolvedPath)
-      if (!configuration) {
-        logger.info('No platform configuration found')
+      const auto = await resolveRootAndProject(resolvedPath)
+      if (auto && auto.root !== resolvedPath) {
+        logger.info(`Detected platform root at: ${auto.root}`)
+        resolvedPath = auto.root
+        project = project || auto.inferredProject
+      } else if (!auto) {
+        logger.error('No platform configuration found')
         return
       }
+      const configuration = auto.configuration
 
       env = await resolveSelectedEnvironment(resolvedPath, env)
 

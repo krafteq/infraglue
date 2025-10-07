@@ -72,6 +72,8 @@ export async function getPlatformConfiguration(rootPath: string = process.cwd())
   const config = await readConfigFile(rootPath)
   if (!config) {
     throw new Error(`No config file found in ${rootPath}. Tried ${CONFIG_FILE_NAMES.join(', ')}`)
+  } else if (!config.workspace) {
+    throw new Error(`No workspace found in ${rootPath}.`)
   }
   const workspaces = await readWorkspaces(config, rootPath)
   const result: PlatformDetectionResult = {
