@@ -7,7 +7,7 @@ import type { ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary, ChangeAction } from './provider-plan.js'
 import type { IProvider } from './provider.js'
 import type { ExecOptions } from 'node:child_process'
-import { logger } from '../utils/logger'
+import { logger } from '../utils/logger.js'
 
 const execAsync = promisify(exec)
 const accessAsync = promisify(access)
