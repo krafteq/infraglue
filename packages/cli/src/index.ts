@@ -600,4 +600,10 @@ function displayPlatformInfo(result: PlatformDetectionResult) {
   logger.debug(JSON.stringify(result, null, 2))
 }
 
+// change current directory for local development
+if (process.env['__DEV_CWD']) {
+  logger.debug(`chdir ${process.env['__DEV_CWD']}`)
+  process.chdir(process.env['__DEV_CWD'])
+}
+
 program.parse()
