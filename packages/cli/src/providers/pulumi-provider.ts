@@ -254,6 +254,16 @@ class PulumiProvider implements IProvider {
     return options
   }
 
+  async execAnyCommand(
+    command: string,
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    env: string,
+  ): Promise<string> {
+    await this.setPulumiConfig(configuration, input, env)
+    return this.execCommand(`pulumi ${command}`, configuration, env)
+  }
+
   private async execCommand(command: string, configuration: ProviderConfig, env: string): Promise<string> {
     try {
       logger.debug(`[pulumi] exec: ${command}\n  cwd: ${configuration.rootPath}`)

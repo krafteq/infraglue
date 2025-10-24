@@ -552,6 +552,57 @@ configCommand
     }
   })
 
+program
+  .command('provider')
+  .argument('[args...]', 'Arguments to pass to the provider')
+  .action(async (args: string[]) => {
+    const auto = await resolveRootAndProject(resolvedPath)
+    if (!auto) throw new Error('No platform configuration found')
+    resolvedPath = auto.root
+    logger.info(`Detected platform root at: ${auto.root}`)
+    const { inferredProject: project, configuration } = auto
+    if (!project) throw new Error('No project found')
+
+    const workspace = Object.values(configuration.workspaces).find((x) => x.alias === project)
+    if (!workspace) throw new Error(`Workspace ${project} not found`)
+    const provider = getProvider(workspace.provider)
+    if (!provider) throw new Error(`Provider ${workspace.provider} not found`)
+
+    const env = await resolveSelectedEnvironment(resolvedPath, null)
+
+    // TODO: extract outputs logic
+    const outputsCache: Map<string, ProviderOutput> = new Map()
+    logger.info('\n📊 Collecting existing infrastructure outputs...')
+    for (const level of configuration.levels) {
+      for (const workspace of level) {
+        const provider = getProvider(workspace.provider)
+        if (!provider) {
+          throw new Error(`${workspace.alias}:: Provider ${workspace.provider} not found`)
+        }
+        try {
+          const outputs = await provider.getOutputs(workspace, env)
+          outputsCache.set(workspace.rootPath, outputs)
+        } catch (error) {
+          logger.warn(`❌ couldn't load outputs for ${workspace.alias}: ${error}`)
+        }
+      }
+    }
+
+    // TODO: extract inputs logic
+    const inputs: ProviderInput = {}
+    for (const injectionKey in workspace.injections) {
+      const injection = workspace.injections[injectionKey]
+      const valueToInject = injection.workspace ? outputsCache.get(injection.workspace)?.[injection.key] : undefined
+      if (valueToInject === undefined) {
+        throw new Error(`Value to inject ${injection.key} from workspace ${injection.workspace} is not found`)
+      }
+      inputs[injection.key] = valueToInject
+    }
+
+    const stdout = await provider.execAnyCommand(args.join(' '), workspace, inputs, env)
+    process.stdout.write(stdout)
+  })
+
 function displayPlatformInfo(result: PlatformDetectionResult) {
   logger.info('\n📋 Platform Configuration Summary')
   logger.info('=====================================')

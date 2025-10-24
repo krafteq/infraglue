@@ -18,4 +18,6 @@ export interface IProvider {
   selectEnvironment(configuration: ProviderConfig, env: string): Promise<void>
 
   existsInFolder(folderPath: string): Promise<boolean>
+
+  execAnyCommand(command: string, configuration: ProviderConfig, input: ProviderInput, env: string): Promise<string>
 }

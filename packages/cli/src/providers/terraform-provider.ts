@@ -234,6 +234,17 @@ class TerraformProvider implements IProvider {
     return `${filesStr} -var-file=${tempVarFile}`
   }
 
+  async execAnyCommand(
+    command: string,
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    env: string,
+  ): Promise<string> {
+    const variables = await this.getVariableString(configuration, input, env)
+    // TODO: command should be before variables, but mb we need to split command into 2 parts: one before vars, one after?
+    return this.execCommand(`terraform ${command} ${variables}`, configuration)
+  }
+
   private async execCommand(command: string, configuration: ProviderConfig): Promise<string> {
     try {
       logger.debug(`[terraform] exec: ${command}\n  cwd: ${configuration.rootPath}`)
