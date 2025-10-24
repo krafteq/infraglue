@@ -223,6 +223,7 @@ class PulumiProvider implements IProvider {
       await this.execCommand(`pulumi stack select ${env}`, configuration, env)
     } catch (error) {
       if (error instanceof Error && error.message.includes(`no stack named '${env}' found`)) {
+        logger.warn(`${configuration.alias}:: Stack ${env} does not exist. Creating it...`)
         await this.execCommand(`pulumi stack init ${env}`, configuration, env)
         await this.execCommand(`pulumi stack select ${env}`, configuration, env)
       } else {
