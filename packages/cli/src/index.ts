@@ -10,6 +10,7 @@ import {
   writeInternalState,
   type PlatformDetectionResult,
   type ProviderConfig,
+  globalConfig,
 } from './core/index.js'
 import { fileURLToPath } from 'url'
 import {
@@ -40,6 +41,7 @@ program
   .name('ig')
   .option('-v, --verbose', 'Show verbose output')
   .option('-q, --quiet', 'Show quiet output')
+  .option('--strict', 'Fail on most warnings')
   .option(
     '-d, --directory <directory>',
     'Root directory of infrastructure monorepo (defaults to current directory)',
@@ -53,6 +55,9 @@ program
     }
     if (command.opts().quiet) {
       logger.setQuiet()
+    }
+    if (command.opts().strict) {
+      globalConfig.strict = true
     }
     resolvedPath = resolve(command.opts().directory)
   })

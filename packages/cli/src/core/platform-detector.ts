@@ -4,6 +4,8 @@ import { parse as parseYaml } from 'yaml'
 import { glob } from 'glob'
 import { sortWorkspacesByLevels } from '../utils/index.js'
 import { providers as knownProviders } from '../providers/index.js'
+import { logger } from '../utils/logger'
+import { globalConfig } from './global-config'
 
 export interface EnvironmentConfig {
   // TODO: MB Environment config should be specific for each provider
@@ -70,7 +72,7 @@ export async function getPlatformConfiguration(rootPath: string = process.cwd())
   if (!config) {
     throw new Error(`No config file found in ${rootPath}. Tried ${CONFIG_FILE_NAMES.join(', ')}`)
   } else if (!config.workspace) {
-    throw new Error(`No workspace found in ${rootPath}.`)
+    throw new Error(`No workspaces found in ${rootPath}.`)
   }
   const workspaces = await readWorkspaces(config, rootPath)
   const result: PlatformDetectionResult = {
@@ -103,11 +105,16 @@ async function detectProvider(path: string): Promise<string | null> {
   return null
 }
 
-async function getWorkspaceConfiguration(path: string, rootPath: string): Promise<ProviderConfig> {
+async function getWorkspaceConfiguration(path: string, rootPath: string): Promise<ProviderConfig | null> {
   const config = await readConfigFile(path)
   const provider = config?.provider || (await detectProvider(path))
   if (!provider) {
-    throw new Error(`No provider found in ${path}`)
+    if (globalConfig.strict) {
+      throw new Error(`No provider found in ${path}`)
+    } else {
+      logger.warn(`No provider found in ${path}. Skipping.`)
+      return null
+    }
   }
   return {
     rootMonoRepoFolder: rootPath,
@@ -140,16 +147,16 @@ async function readWorkspaces(rootConfig: PlatformConfig, rootPath: string): Pro
   )
 
   return Object.fromEntries(
-    (await Promise.all(workspacePaths.flat().map((path) => getWorkspaceConfiguration(path, rootPath)))).map(
-      (config, index) => [
+    (await Promise.all(workspacePaths.flat().map((path) => getWorkspaceConfiguration(path, rootPath))))
+      .map((config, index) => [
         workspacePaths.flat()[index],
-        {
+        config && {
           ...config,
           envs: config.envs || rootConfig.envs,
           alias: config.alias || relative(rootPath, config.rootPath),
         },
-      ],
-    ),
+      ])
+      .filter((x) => !!x[1]),
   )
 }
 
@@ -211,8 +218,17 @@ export async function resolveRootAndProject(
         }
       }
       return { root: current, inferredProject, configuration }
-    } catch {
-      /* empty */
+    } catch (error) {
+      // TODO: add more specific Exception classes
+
+      if (
+        !(
+          error instanceof Error &&
+          (error.message.includes('No config file found in') || error.message.includes('No workspaces found in'))
+        )
+      ) {
+        throw error
+      }
     }
     const parent = dirname(current)
     if (parent === current) break
