@@ -19,6 +19,9 @@ class Logger {
   setQuiet() {
     this.level = 'silent'
   }
+  isVerbose() {
+    return this.should('debug')
+  }
 
   private should(level: Level) {
     return order[level] <= order[this.level]

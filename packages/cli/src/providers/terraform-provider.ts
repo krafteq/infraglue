@@ -194,13 +194,16 @@ class TerraformProvider implements IProvider {
     try {
       const BACKEND_CONFIG_FILE = join(configuration.rootPath, '__ig__backend.tf')
 
-      const backendFile = configuration.envs?.[environment]?.backend_file
-      const backendType = configuration.envs?.[environment]?.backend_type
+      const selectedEnv = configuration.envs?.[environment]
+
+      const backendFile = selectedEnv?.backend_file
+      const backendType = selectedEnv?.backend_type
       if (backendFile) {
         await copyFile(join(configuration.rootPath, backendFile), BACKEND_CONFIG_FILE)
       } else if (backendType) {
         await writeFile(BACKEND_CONFIG_FILE, `terraform { \n  backend "${backendType}" {} \n}`)
       } else {
+        logger.warn(`${configuration.alias}:: No backend configuration found for environment ${environment}`)
         if (
           await access(BACKEND_CONFIG_FILE, constants.W_OK)
             .then(() => true)
@@ -209,7 +212,7 @@ class TerraformProvider implements IProvider {
           await rm(BACKEND_CONFIG_FILE)
         }
       }
-      const backendConfigArgs = this.backendConfigToArgs(configuration.envs?.[environment]?.backend_config)
+      const backendConfigArgs = this.backendConfigToArgs(selectedEnv?.backend_config)
       await this.execCommand(`terraform init ${backendConfigArgs} --reconfigure`, configuration)
     } catch (error) {
       throw new Error(`Failed to initialize Terraform in ${configuration.alias}`, { cause: error })

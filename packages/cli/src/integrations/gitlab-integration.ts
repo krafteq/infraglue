@@ -1,6 +1,6 @@
 import { logger } from '../utils/logger.js'
 
-// TODO: refactor this.
+// TODO: refactor this. and implement IIntegration
 
 /**
  * GitLab API client for interacting with GitLab merge requests

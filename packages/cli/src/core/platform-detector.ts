@@ -1,12 +1,9 @@
-import { readFile } from 'fs'
-import { join, relative } from 'path'
+import { readFile } from 'fs/promises'
+import { dirname, join, relative, resolve, sep } from 'path'
 import { parse as parseYaml } from 'yaml'
-import { promisify } from 'util'
 import { glob } from 'glob'
 import { sortWorkspacesByLevels } from '../utils/index.js'
 import { providers as knownProviders } from '../providers/index.js'
-
-const readFileAsync = promisify(readFile)
 
 export interface EnvironmentConfig {
   // TODO: MB Environment config should be specific for each provider
@@ -57,7 +54,7 @@ const DEFAULT_ENCODING = 'utf-8'
 async function readConfigFile(dirPath: string): Promise<PlatformConfig | null> {
   for (const candidate of CONFIG_FILE_NAMES) {
     try {
-      const content = await readFileAsync(join(dirPath, candidate), DEFAULT_ENCODING)
+      const content = await readFile(join(dirPath, candidate), DEFAULT_ENCODING)
       return parseYaml(content) as PlatformConfig
     } catch (error) {
       if (!(error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT')) {
@@ -167,7 +164,7 @@ function getDependencyGraph(config: PlatformDetectionResult): {
     for (const injectionKey in workspace.injections) {
       const injection = workspace.injections[injectionKey]
       if (injection.workspace === null) {
-        // meaning it should be part of input)
+        // it means this injection should be part of the input if we ever support that
         continue
       }
       const dependency = config.workspaces[injection.workspace]
@@ -175,9 +172,7 @@ function getDependencyGraph(config: PlatformDetectionResult): {
         errors.push(
           `Injection ${injectionKey} of workspace ${workspaceKey} references non-existent workspace ${injection.workspace}`,
         )
-      }
-      // TODO: we may need to check the outputs of other providers as well
-      else if (dependencies[injection.workspace]?.includes(workspaceKey)) {
+      } else if (dependencies[injection.workspace]?.includes(workspaceKey)) {
         errors.push(`Circular dependency detected: ${injection.workspace} -> ${workspaceKey} -> ${injection.workspace}`)
       } else {
         ;(dependencies[workspaceKey] ||= []).push(injection.workspace)
@@ -193,7 +188,35 @@ function getDependencyGraph(config: PlatformDetectionResult): {
       dependencies[workspaceKey] = [...(dependencies[workspaceKey] || []), depends_on]
     }
   }
-  // validate that all outputs are valid
+  // TODO: validate that all outputs are valid
 
   return { errors, dependencies }
+}
+
+export async function resolveRootAndProject(
+  startPath: string,
+): Promise<{ root: string; inferredProject?: string | undefined; configuration: PlatformDetectionResult } | null> {
+  let current = resolve(startPath)
+  const original = current
+  while (true) {
+    try {
+      const configuration = await getPlatformConfiguration(current)
+      let inferredProject: string | undefined
+      const workspaces = Object.values(configuration.workspaces)
+      for (const ws of workspaces) {
+        const wsPath = resolve(ws.rootPath)
+        if (original.startsWith(wsPath + sep) || original === wsPath) {
+          inferredProject = ws.alias
+          break
+        }
+      }
+      return { root: current, inferredProject, configuration }
+    } catch {
+      /* empty */
+    }
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return null
 }
