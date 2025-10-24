@@ -101,7 +101,14 @@ envCommand
   .command('select')
   .argument('env', 'Environment to select')
   .description('Select the environment to use')
-  .action(selectEnv)
+  .action(async (env: string) => {
+    const auto = await resolveRootAndProject(resolvedPath)
+    if (auto && auto.root !== resolvedPath) {
+      logger.info(`Detected platform root at: ${auto.root}`)
+      resolvedPath = auto.root
+    }
+    await selectEnv(env)
+  })
 
 envCommand
   .command('current')
