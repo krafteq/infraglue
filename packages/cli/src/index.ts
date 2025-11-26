@@ -3,27 +3,16 @@
 import { Command } from 'commander'
 import { dirname, join, resolve } from 'path'
 import { readFile } from 'fs/promises'
-import {
-  getPlatformConfiguration,
-  readInternalState,
-  resolveRootAndProject,
-  writeInternalState,
-  type PlatformDetectionResult,
-  type ProviderConfig,
-  globalConfig,
-} from './core/index.js'
+import { globalConfig } from './core/index.js'
 import { fileURLToPath } from 'url'
-import {
-  type ProviderOutput,
-  type IProvider,
-  type ProviderInput,
-  type ProviderPlan,
-  getProvider,
-  hasChanges,
-} from './providers/index.js'
 import { getFormatter } from './formatters/index.js'
 import { getIntegration } from './integrations/index.js'
 import { logger } from './utils/logger.js'
+import { tryResolveMonorepo } from './core/monorepo-reader'
+import { ExecutionContext, Monorepo, Workspace } from './core/model'
+import { MultistageExecutor } from './core/multistage-executor'
+import { UserError } from './utils/errors'
+import { EnvManager } from './core/env-manager'
 
 export async function getPackageJsonVersion(): Promise<string> {
   const __filename = fileURLToPath(import.meta.url)
@@ -36,7 +25,9 @@ export async function getPackageJsonVersion(): Promise<string> {
 
 const program = new Command()
 
-let resolvedPath: string // TODO: it shouldn't be global, should it?
+let currentDir: string
+let monorepo: Monorepo | null = null
+
 program
   .name('ig')
   .option('-v, --verbose', 'Show verbose output')
@@ -49,7 +40,7 @@ program
   )
   .description('CLI tool for infra-glue')
   .version(await getPackageJsonVersion())
-  .hook('preAction', (command) => {
+  .hook('preAction', async (command) => {
     if (command.opts().verbose) {
       logger.setVerbose()
     }
@@ -59,47 +50,9 @@ program
     if (command.opts().strict) {
       globalConfig.strict = true
     }
-    resolvedPath = resolve(command.opts().directory)
+    currentDir = resolve(command.opts().directory)
+    monorepo = await tryResolveMonorepo(currentDir)
   })
-
-const selectEnv = async (env: string) => {
-  logger.info(`Setting environment to ${env}`)
-
-  const configuration = await getPlatformConfiguration(resolvedPath)
-  if (!configuration) {
-    logger.warn('No platform configuration found')
-    return
-  }
-  const promises: Promise<unknown>[] = []
-  for (const level of configuration.levels) {
-    for (const workspace of level) {
-      const provider = getProvider(workspace.provider)
-      if (!provider) {
-        throw new Error(`Provider ${workspace.provider} not found`)
-      }
-      logger.info(`Selecting environment for ${workspace.alias}`)
-      promises.push(provider.selectEnvironment(workspace, env))
-    }
-  }
-  await Promise.all(promises)
-  await writeInternalState(resolvedPath, { current_environment: env })
-  logger.info('Environment selected successfully')
-}
-
-const resolveSelectedEnvironment = async (path: string, userSelectedEnv: string | null): Promise<string> => {
-  const state = await readInternalState(path)
-  const stateEnv = state?.current_environment
-  if (userSelectedEnv) {
-    if (userSelectedEnv !== stateEnv) {
-      await selectEnv(userSelectedEnv)
-      await writeInternalState(path, { current_environment: userSelectedEnv })
-    }
-    return userSelectedEnv
-  } else if (stateEnv) {
-    return stateEnv
-  }
-  throw new Error('No environment selected. Please select an environment or provide an environment with --env')
-}
 
 const envCommand = program.command('env')
 envCommand
@@ -107,26 +60,15 @@ envCommand
   .argument('env', 'Environment to select')
   .description('Select the environment to use')
   .action(async (env: string) => {
-    const auto = await resolveRootAndProject(resolvedPath)
-    if (auto && auto.root !== resolvedPath) {
-      logger.info(`Detected platform root at: ${auto.root}`)
-      resolvedPath = auto.root
-    }
-    await selectEnv(env)
+    await new EnvManager(requireMonorepo()).selectEnv(env)
   })
 
 envCommand
   .command('current')
   .description('Show the current environment')
   .action(async () => {
-    const state = await readInternalState(resolvedPath)
-    const stateEnv = state?.current_environment
-    if (stateEnv) {
-      process.stdout.write(`${stateEnv}\n`)
-    } else {
-      logger.error('No environment selected')
-      process.exit(1)
-    }
+    const selectedEnv = await new EnvManager(requireMonorepo()).selectedEnv()
+    process.stdout.write(`${selectedEnv}\n`)
   })
 
 interface IApplyOptions {
@@ -136,386 +78,46 @@ interface IApplyOptions {
   env: string
   project?: string
 }
-program
-  .command('apply')
-  .description('Apply the platform configuration')
-  .option('-f, --format <format>', 'Select formatter for the plan', 'default')
-  .option('-i, --integration <integration>', 'Integration to use', 'cli')
-  .option(
-    '-a, --approve <level_index>',
-    'Approve the plan for a specific level for non-interactive integration',
-    (value) => {
-      const parsedValue = parseInt(value, 10)
-      if (isNaN(parsedValue)) {
-        throw new Error('The level_index must be a number')
-      }
-      return parsedValue
-    },
-  )
-  .option('-p, --project <project>', 'Project to apply')
-  .option('-e, --env <env>', 'environment to apply. If provided, the environment will be selected before applying')
-  .action(async ({ format, integration, approve, env, project }: IApplyOptions) => {
-    logger.info(`Applying platform configuration in: ${resolvedPath}`)
-    const auto = await resolveRootAndProject(resolvedPath)
-    if (auto && auto.root !== resolvedPath) {
-      logger.info(`Detected platform root at: ${auto.root}`)
-      resolvedPath = auto.root
-      project = project || auto.inferredProject
-    } else if (!auto) {
-      logger.error('No platform configuration found')
-      return
-    }
-    const configuration = auto.configuration
-    const outputsCache: Map<string, ProviderOutput> = new Map()
 
-    env = await resolveSelectedEnvironment(resolvedPath, env)
+const execCommands = [
+  { name: 'apply', desc: 'Apply the platform configuration', isDestroy: false },
+  { name: 'destroy', desc: 'Destroy the platform configuration', isDestroy: true },
+]
 
-    let projectLevel: number | undefined = undefined
-    if (project) {
-      projectLevel = configuration.levels.findIndex((level) => level.find((workspace) => workspace.alias === project))
-      if (projectLevel < 0) {
-        throw new Error(`Project ${project} not found`)
-      }
-      logger.info(
-        `Project ${project} found at level ${projectLevel + 1}. Applying everything until level ${projectLevel + 1}`,
-      )
-    }
-
-    for (
-      let levelIndex = 0;
-      levelIndex < (projectLevel ? projectLevel + 1 : configuration.levels.length);
-      levelIndex++
-    ) {
-      const level = configuration.levels[levelIndex]
-      logger.info(`\n🔧 Processing Level ${levelIndex + 1}/${configuration.levels.length}`)
-      logger.info('=====================================')
-
-      // Collect all plans for this level
-      const levelPlans: Array<{
-        workspace: ProviderConfig
-        provider: IProvider
-        inputs: ProviderInput
-        plan: ProviderPlan
-      }> = []
-
-      for (const workspace of level) {
-        if (project && levelIndex === projectLevel && workspace.alias !== project) {
-          logger.debug(`Skipping ${workspace.alias} as it's not selected project`)
-          continue
+for (const execCmd of execCommands) {
+  program
+    .command(execCmd.name)
+    .description(execCmd.desc)
+    .option('-f, --format <format>', 'Select formatter for the plan', 'default')
+    .option('-i, --integration <integration>', 'Integration to use', 'cli')
+    .option(
+      '-a, --approve <level_index>',
+      'Approve the plan for a specific level for non-interactive integration',
+      (value) => {
+        const parsedValue = parseInt(value, 10)
+        if (isNaN(parsedValue)) {
+          throw new Error('The level_index must be a number')
         }
+        return parsedValue
+      },
+    )
+    .option('-p, --project <project>', 'Project to apply')
+    .option('-e, --env <env>', 'environment to apply. If provided, the environment will be selected before applying')
+    .option('--no-deps', 'Ignore dependencies')
+    .action(async ({ format, integration, approve, env, project, deps }: IApplyOptions & { deps: boolean }) => {
+      const monorepo = requireMonorepo()
+      env = await resolveEnv(env)
 
-        const provider = getProvider(workspace.provider)
-        if (!provider) {
-          throw new Error(`Provider ${workspace.provider} not found`)
-        }
-        const inputs: ProviderInput = {}
+      const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, execCmd.isDestroy, env)
 
-        for (const injectionKey in workspace.injections) {
-          const injection = workspace.injections[injectionKey]
-          const valueToInject = injection.workspace ? outputsCache.get(injection.workspace)?.[injection.key] : undefined
-          if (valueToInject === undefined) {
-            throw new Error(`Value to inject ${injection.key} from workspace ${injection.workspace} is not found`)
-          }
-          inputs[injection.key] = valueToInject
-        }
-
-        const plan = await provider.getPlan(workspace, inputs, env)
-        if (!hasChanges(plan)) {
-          const outputs = await provider.getOutputs(workspace, env)
-          logger.info(`✅ ${workspace.alias} is up to date.`)
-          // TODO: outputs can contain secrets, decide if we want to output them
-          logger.debug(`Outputs: ${JSON.stringify(outputs, null, 2)}`)
-          outputsCache.set(workspace.rootPath, outputs)
-          continue
-        }
-
-        levelPlans.push({ workspace, provider, inputs, plan })
-      }
-
-      // If no plans to apply in this level, continue to next level
-      if (levelPlans.length === 0) {
-        logger.info('✅ No changes needed in this level')
-        continue
-      }
-
-      // TODO: it should probably be part of the formatter as well.
-      logger.info('--------------------------------')
-      logger.info(`📋 Level ${levelIndex + 1} Plan Summary:`)
-      logger.info('--------------------------------')
-
-      let totalAdd = 0
-      let totalChange = 0
-      let totalRemove = 0
-      let totalReplace = 0
-      let totalOutputChanges = 0
-
-      for (const { workspace, plan } of levelPlans) {
-        logger.info(`\n🏭 Workspace: ${workspace.alias}`)
-        logger.info(
-          `   Add: ${plan.changeSummary.add}, Change: ${plan.changeSummary.change}, Remove: ${plan.changeSummary.remove}, Replace: ${plan.changeSummary.replace}, Outputs: ${plan.changeSummary.outputUpdates}`,
-        )
-        totalAdd += plan.changeSummary.add
-        totalChange += plan.changeSummary.change
-        totalRemove += plan.changeSummary.remove
-        totalReplace += plan.changeSummary.replace
-        totalOutputChanges += plan.changeSummary.outputUpdates
-      }
-
-      logger.info(
-        `\n📊 Total Changes: Add: ${totalAdd}, Change: ${totalChange}, Remove: ${totalRemove}, Replace: ${totalReplace}, Outputs: ${totalOutputChanges}`,
-      )
-
-      let message = levelPlans
-        .map(({ workspace, inputs, plan }) => {
-          const formatter = getFormatter(format)
-          const formatted = formatter.format(plan)
-          return `🏭 Workspace: ${workspace.alias}\nInputs:\n${JSON.stringify(inputs, null, 2)}\nPlan:\n${formatted}`
-        })
-        .join('\n--------------------------------\n')
-
-      message += '\n--------------------------------\n'
-      message +=
-        project && projectLevel === levelIndex
-          ? `Apply ${project} from level ${levelIndex + 1}?`
-          : `Apply all workspaces in Level ${levelIndex + 1}?`
-
-      const integrationInstance = getIntegration(integration)
-      if (!integrationInstance.interactive && approve === levelIndex + 1) {
-        logger.info(`Level ${levelIndex + 1} approved, applying...`)
-      } else {
-        const answer = await integrationInstance.askForConfirmation(message)
-
-        if (!integrationInstance.interactive) {
-          logger.info('Not interactive, waiting for confirmation and another cli execution')
-          return
-        }
-
-        if (!answer) {
-          logger.info('Aborting...')
-          return
-        }
-      }
-
-      // Apply all workspaces in this level
-      logger.info(`\n🚀 Applying Level ${levelIndex + 1}...`)
-      const applyPromises = levelPlans.map(async ({ workspace, provider, inputs }) => {
-        logger.info(`   Applying ${workspace.alias}...`)
-        const outputs = await provider.apply(workspace, inputs, env)
-        outputsCache.set(workspace.rootPath, outputs)
-        logger.info(`   ✅ ${workspace.alias} applied successfully`)
-        return { workspace: workspace.rootPath, outputs }
+      await new MultistageExecutor(execContext).exec({
+        approve: approve,
+        integration: getIntegration(integration),
+        formatter: getFormatter(format),
+        preview: false,
       })
-
-      await Promise.all(applyPromises)
-      logger.info(`✅ Level ${levelIndex + 1} completed`)
-    }
-
-    logger.info('\n--------------------------------')
-    logger.info('🎉 Infrastructure applied successfully')
-    if (!project) {
-      const result: ProviderOutput = {}
-      for (const outputKey in configuration.output) {
-        const output = configuration.output[outputKey]
-        const valueToOutput = output.workspace ? outputsCache.get(output.workspace)?.[output.key] : 'TODO?'
-        if (valueToOutput === undefined) {
-          logger.warn(`Value to output ${output.key} from workspace ${output.workspace} is not found`)
-        } else {
-          result[outputKey] = valueToOutput
-        }
-      }
-      logger.info('Outputs:')
-      logger.info(JSON.stringify(result, null, 2))
-      logger.info('--------------------------------')
-    }
-  })
-
-type IDestroyOptions = IApplyOptions
-program
-  .command('destroy')
-  .description('Destroy the platform configuration for a directory interactively')
-  .option('-f, --format <format>', 'Format the plan', 'default')
-  .option('-i, --integration <integration>', 'Integration to use', 'cli')
-  .option('-a, --approve <level_index>', 'Approve the plan for a specific level', (value) => {
-    const parsedValue = parseInt(value, 10)
-    if (isNaN(parsedValue)) {
-      throw new Error('The level_index must be a number')
-    }
-    return parsedValue
-  })
-  .option('-p, --project <project>', 'Project to destroy')
-  .option('-e, --env <env>', 'environment to apply. If provided, the environment will be selected before applying')
-  .action(async ({ format, integration, approve, env, project }: IDestroyOptions) => {
-    logger.info(`Destroying platform configuration in: ${resolvedPath}`)
-
-    const auto = await resolveRootAndProject(resolvedPath)
-    if (auto && auto.root !== resolvedPath) {
-      logger.info(`Detected platform root at: ${auto.root}`)
-      resolvedPath = auto.root
-      project = project || auto.inferredProject
-    } else if (!auto) {
-      logger.error('No platform configuration found')
-      return
-    }
-    const configuration = auto.configuration
-
-    env = await resolveSelectedEnvironment(resolvedPath, env)
-
-    // First, collect all outputs from existing infrastructure
-    const outputsCache: Map<string, ProviderOutput> = new Map()
-    logger.info('\n📊 Collecting existing infrastructure outputs...')
-    for (const level of configuration.levels) {
-      for (const workspace of level) {
-        const provider = getProvider(workspace.provider)
-        if (!provider) {
-          throw new Error(`${workspace.alias}:: Provider ${workspace.provider} not found`)
-        }
-        try {
-          const outputs = await provider.getOutputs(workspace, env)
-          outputsCache.set(workspace.rootPath, outputs)
-        } catch (error) {
-          logger.warn(`❌ couldn't load outputs for ${workspace.alias}: ${error}`)
-        }
-      }
-    }
-
-    let projectLevel: number | undefined = undefined
-    if (project) {
-      projectLevel = configuration.levels.findIndex((level) => level.find((workspace) => workspace.alias === project))
-      if (projectLevel < 0) {
-        throw new Error(`Project ${project} not found`)
-      }
-      logger.info(
-        `Project ${project} found at level ${projectLevel + 1}. Destroying everything above level ${projectLevel + 1}`,
-      )
-    }
-
-    for (let levelIndex = configuration.levels.length - 1; levelIndex >= (projectLevel || 0); levelIndex--) {
-      const level = configuration.levels[levelIndex]
-      logger.info(`\n🗑️  Processing Level ${levelIndex + 1}/${configuration.levels.length} for destruction`)
-      logger.info('=====================================')
-
-      // Collect all destroy plans for this level
-      const levelDestroyPlans: Array<{
-        workspace: ProviderConfig
-        provider: IProvider
-        inputs: ProviderInput
-        plan: ProviderPlan
-      }> = []
-
-      for (const workspace of level) {
-        if (project && levelIndex === projectLevel && workspace.alias !== project) {
-          logger.debug(`Skipping ${workspace.alias} as it's not selected project`)
-          continue
-        }
-
-        const provider = getProvider(workspace.provider)
-        if (!provider) {
-          throw new Error(`Provider ${workspace.provider} not found`)
-        }
-        const isDestroyed = await provider.isDestroyed(workspace, env)
-        if (isDestroyed) {
-          logger.info(`✅ ${workspace.alias} is already destroyed.`)
-          continue
-        }
-
-        const inputs: ProviderInput = {}
-        for (const injectionKey in workspace.injections) {
-          const injection = workspace.injections[injectionKey]
-          const valueToInject = injection.workspace ? outputsCache.get(injection.workspace)?.[injection.key] : undefined
-          if (valueToInject === undefined) {
-            throw new Error(`Value to inject ${injection.key} from workspace ${injection.workspace} is not found`)
-          }
-          inputs[injection.key] = valueToInject
-        }
-
-        const plan = await provider.destroyPlan(workspace, inputs, env)
-        if (!hasChanges(plan)) {
-          logger.info(`✅ Nothing to destroy in ${workspace.alias}`)
-          continue
-        }
-
-        levelDestroyPlans.push({ workspace, provider, inputs, plan })
-      }
-
-      // If no plans to destroy in this level, continue to next level
-      if (levelDestroyPlans.length === 0) {
-        logger.info('✅ No resources to destroy in this level')
-        continue
-      }
-
-      // Show combined destroy plan for the level
-      // TODO: it should be part of the formatter as well.
-      logger.info('--------------------------------')
-      logger.info(`📋 Level ${levelIndex + 1} Destroy Plan Summary:`)
-      logger.info('--------------------------------')
-
-      let totalAdd = 0
-      let totalChange = 0
-      let totalRemove = 0
-      let totalReplace = 0
-
-      for (const { workspace, plan } of levelDestroyPlans) {
-        logger.info(`\n🏭 Workspace: ${workspace.alias}`)
-        logger.info(
-          `   Add: ${plan.changeSummary.add}, Change: ${plan.changeSummary.change}, Remove: ${plan.changeSummary.remove}, Replace: ${plan.changeSummary.replace}`,
-        )
-        totalAdd += plan.changeSummary.add
-        totalChange += plan.changeSummary.change
-        totalRemove += plan.changeSummary.remove
-        totalReplace += plan.changeSummary.replace
-      }
-
-      logger.info(
-        `\n📊 Total Changes: Add: ${totalAdd}, Change: ${totalChange}, Remove: ${totalRemove}, Replace: ${totalReplace}`,
-      )
-
-      const formatter = getFormatter(format)
-      let message = levelDestroyPlans
-        .map(({ workspace, plan }) => {
-          const formatted = formatter.format(plan)
-          return `🏭 Workspace: ${workspace.alias}\nDestroy Plan:\n${formatted}`
-        })
-        .join('\n--------------------------------\n')
-
-      message += '\n--------------------------------\n'
-      message +=
-        project && levelIndex === projectLevel
-          ? `Destroy ${project} from level ${levelIndex + 1}?`
-          : `🗑️  Destroy all workspaces in Level ${levelIndex + 1}?`
-
-      const integrationInstance = getIntegration(integration)
-      if (!integrationInstance.interactive && approve === levelIndex + 1) {
-        logger.info(`Level ${levelIndex + 1} approved, destroying...`)
-      } else {
-        const answer = await integrationInstance.askForConfirmation(message)
-
-        if (!integrationInstance.interactive) {
-          logger.info('Not interactive, waiting for confirmation and another cli execution')
-          return
-        }
-
-        if (!answer) {
-          logger.info('Aborting...')
-          return
-        }
-      }
-
-      // Destroy all workspaces in this level
-      logger.info(`\n💥 Destroying Level ${levelIndex + 1}...`)
-      const destroyPromises = levelDestroyPlans.map(async ({ workspace, provider, inputs }) => {
-        logger.info(`   Destroying ${workspace.alias}...`)
-        await provider.destroy(workspace, inputs, env)
-        logger.info(`   ✅ ${workspace.alias} destroyed successfully`)
-        return { workspace: workspace.rootPath }
-      })
-
-      await Promise.all(destroyPromises)
-      logger.info(`✅ Level ${levelIndex + 1} destroyed`)
-    }
-
-    logger.info('\n--------------------------------')
-    logger.info('🎉 Infrastructure destroyed successfully')
-  })
+    })
+}
 
 const configCommand = program.command('config')
 
@@ -523,7 +125,7 @@ configCommand
   .command('init')
   .description('To be implemented. Initialize a new platform configuration for a directory')
   .action(async () => {
-    logger.info(`Initializing platform configuration in: ${resolvedPath}`)
+    logger.info(`Initializing platform configuration in: ${currentDir}`)
     logger.error('Not implemented yet')
   })
 
@@ -533,18 +135,17 @@ configCommand
   .option('-j, --json', 'Output in JSON format')
   .action(async (options: { json?: boolean }) => {
     try {
-      logger.info(`Analyzing platform configuration in: ${resolvedPath}`)
+      logger.info(`Analyzing platform configuration in: ${currentDir}`)
 
-      const result = await getPlatformConfiguration(resolvedPath)
-      if (!result) {
+      if (!monorepo) {
         logger.info('No platform configuration found')
         return
       }
 
       if (options.json) {
-        logger.info(JSON.stringify(result, null, 2))
+        logger.info(JSON.stringify(monorepo.configFile, null, 2))
       } else {
-        displayPlatformInfo(result)
+        displayPlatformInfo(monorepo)
       }
     } catch (error) {
       console.error('Error:', error instanceof Error ? error.message : error)
@@ -556,75 +157,83 @@ program
   .command('provider')
   .argument('[args...]', 'Arguments to pass to the provider')
   .action(async (args: string[]) => {
-    const auto = await resolveRootAndProject(resolvedPath)
-    if (!auto) throw new Error('No platform configuration found')
-    resolvedPath = auto.root
-    logger.info(`Detected platform root at: ${auto.root}`)
-    const { inferredProject: project, configuration } = auto
-    if (!project) throw new Error('No project found')
+    const monorepo = requireMonorepo()
+    const ws = requireCurrentWorkspace()
+    const env = await resolveEnv()
 
-    const workspace = Object.values(configuration.workspaces).find((x) => x.alias === project)
-    if (!workspace) throw new Error(`Workspace ${project} not found`)
-    const provider = getProvider(workspace.provider)
-    if (!provider) throw new Error(`Provider ${workspace.provider} not found`)
+    const executionCtx = new ExecutionContext(monorepo, ws, true, false, env)
 
-    const env = await resolveSelectedEnvironment(resolvedPath, null)
+    const stdout = await executionCtx.interop(ws).execAnyCommand(args, () => executionCtx.getInputs(ws))
 
-    // TODO: extract outputs logic
-    const outputsCache: Map<string, ProviderOutput> = new Map()
-    logger.info('\n📊 Collecting existing infrastructure outputs...')
-    for (const level of configuration.levels) {
-      for (const workspace of level) {
-        const provider = getProvider(workspace.provider)
-        if (!provider) {
-          throw new Error(`${workspace.alias}:: Provider ${workspace.provider} not found`)
-        }
-        try {
-          const outputs = await provider.getOutputs(workspace, env)
-          outputsCache.set(workspace.rootPath, outputs)
-        } catch (error) {
-          logger.warn(`❌ couldn't load outputs for ${workspace.alias}: ${error}`)
-        }
-      }
-    }
-
-    // TODO: extract inputs logic
-    const inputs: ProviderInput = {}
-    for (const injectionKey in workspace.injections) {
-      const injection = workspace.injections[injectionKey]
-      const valueToInject = injection.workspace ? outputsCache.get(injection.workspace)?.[injection.key] : undefined
-      if (valueToInject === undefined) {
-        throw new Error(`Value to inject ${injection.key} from workspace ${injection.workspace} is not found`)
-      }
-      inputs[injection.key] = valueToInject
-    }
-
-    const stdout = await provider.execAnyCommand(args.join(' '), workspace, inputs, env)
     process.stdout.write(stdout)
   })
 
-function displayPlatformInfo(result: PlatformDetectionResult) {
+async function resolveEnv(env?: string | undefined): Promise<string> {
+  if (env) {
+    await new EnvManager(requireMonorepo()).selectEnv(env)
+    return env
+  } else {
+    const currentEnv = await new EnvManager(requireMonorepo()).selectedEnv()
+    if (!currentEnv) {
+      throw new UserError('No environment selected')
+    }
+    return currentEnv
+  }
+}
+
+function requireMonorepo(): Monorepo {
+  if (monorepo === null) {
+    throw new UserError(
+      `Monorepo not found. Ensure there is ig.yml file describing with 'workspace' field present in ${currentDir}`,
+    )
+  }
+  return monorepo
+}
+
+function currentWorkspace(project?: string | undefined): Workspace | undefined {
+  if (project) {
+    return requireMonorepo().getWorkspace(project)
+  }
+
+  if (currentDir !== requireMonorepo().path) {
+    return requireMonorepo().getWorkspace(currentDir)
+  }
+
+  return undefined
+}
+
+function requireCurrentWorkspace(project?: string | undefined): Workspace {
+  const ws = currentWorkspace(project)
+  if (!ws) {
+    throw new UserError(
+      `Single workspace is required. Either run a command from workspace directory or pass --project argument`,
+    )
+  }
+  return ws
+}
+
+function displayPlatformInfo(monorepo: Monorepo) {
   logger.info('\n📋 Platform Configuration Summary')
   logger.info('=====================================')
 
-  if (Object.keys(result.workspaces).length > 0) {
-    logger.info(`\n📁 Workspaces (${Object.keys(result.workspaces).length}):`)
-    Object.entries(result.workspaces).forEach(([name, workspace]) => {
-      logger.info(`  • ${name} (${workspace.provider})`)
+  if (monorepo.workspaces.length > 0) {
+    logger.info(`\n📁 Workspaces (${monorepo.workspaces.length}):`)
+    monorepo.workspaces.forEach((workspace) => {
+      logger.info(`  • ${workspace.name} (${workspace.providerName})`)
     })
   } else {
     logger.info('\n📁 No workspaces found')
   }
 
-  if (result.output && Object.keys(result.output).length > 0) {
-    logger.info(`\n📤 Outputs (${Object.keys(result.output).length}):`)
-    Object.entries(result.output).forEach(([key, output]) => {
-      logger.info(`  • ${key} ← ${output.workspace}:${output.key}`)
+  if (monorepo.exports && monorepo.exports.length > 0) {
+    logger.info(`\n📤 Outputs (${monorepo.exports.length}):`)
+    monorepo.exports.forEach((exp) => {
+      logger.info(`  • ${exp.name} ← ${exp.workspace}:${exp.key}`)
     })
   }
 
   logger.debug('\n🔍 Detailed Information:')
-  logger.debug(JSON.stringify(result, null, 2))
+  logger.debug(JSON.stringify(monorepo.configFile, null, 2))
 }
 
 // change current directory for local development
@@ -634,16 +243,27 @@ if (process.env['__DEV_CWD']) {
 }
 
 process.on('uncaughtException', (err) => {
-  if (err instanceof Error && !logger.isVerbose()) {
-    logger.error(err.message)
-    process.exit(1)
-  } else throw err
+  handleError(err)
 })
+
 process.on('unhandledRejection', (err) => {
-  if (err instanceof Error && logger.isVerbose()) {
-    logger.error(err.message)
-    process.exit(1)
+  if (err instanceof Error) {
+    handleError(err)
   } else throw err
 })
+
+function handleError(err: Error) {
+  if (err instanceof UserError) {
+    logger.error(err.message)
+    process.exit(2)
+  }
+
+  if (!logger.isVerbose()) {
+    logger.error(err.message)
+    process.exit(1)
+  }
+
+  throw err
+}
 
 program.parse()

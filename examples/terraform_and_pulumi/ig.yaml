@@ -11,15 +11,3 @@ output:
 # TODO: explicit providers
 # providers_map:
 #   whataber: '@3rd-party/provider-whatever'
-
-# We can specify defaults which can be overridden in each workspace.
-# In the case of a mix of pulumi and terraform I don't see how defaults could be useful at all.
-#envs:
-#  qa:
-#    backend_config:
-#    var_files:
-#    vars:
-#  dev:
-#    backend_config:
-#    var_files:
-#    vars:

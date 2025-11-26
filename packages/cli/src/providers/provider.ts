@@ -1,8 +1,32 @@
-import type { ProviderConfig } from '../core/platform-detector.js'
 import type { ProviderPlan } from './provider-plan.js'
 
 export type ProviderOutput = Record<string, string> // TODO: for pulumi it could be a complex object. MB we need to allow deeper value selection in the future.
 export type ProviderInput = Record<string, string>
+
+export interface PlatformInjection {
+  workspace: string | null
+  key: string
+}
+
+export interface ProviderConfig {
+  rootMonoRepoFolder: string
+  rootPath: string
+  provider: string
+  injections: Record<string, PlatformInjection>
+  depends_on?: string[]
+  envs: Record<string, EnvironmentConfig> | undefined
+  alias: string
+}
+
+export interface EnvironmentConfig {
+  // TODO: MB Environment config should be specific for each provider
+  //  It seems like for pulumi we really need only backend_config, or rather Env Vars
+  backend_file?: string // for terraform only.
+  backend_type?: string // for terraform only.
+  backend_config?: Record<string, string>
+  var_files?: string[]
+  vars?: Record<string, string>
+}
 
 export interface IProvider {
   getProviderName(): string
@@ -19,5 +43,10 @@ export interface IProvider {
 
   existsInFolder(folderPath: string): Promise<boolean>
 
-  execAnyCommand(command: string, configuration: ProviderConfig, input: ProviderInput, env: string): Promise<string>
+  execAnyCommand(
+    command: string[],
+    configuration: ProviderConfig,
+    input: () => Promise<ProviderInput>,
+    env: string,
+  ): Promise<string>
 }

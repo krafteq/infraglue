@@ -1,86 +1,39 @@
-/**
- * Sorts workspaces by dependency levels using Kahn's Algorithm.
- * Returns an array of arrays where each inner array contains workspaces
- * that can be processed at the same level.
- *
- * Time Complexity: O(V + E)
- * Space Complexity: O(V + E)
- *
- * @param workspaces - Record of workspace paths to PlatformDetectionResult
- * @param dependencies - Record of workspace paths to their dependency arrays
- * @returns Array of arrays, each containing workspaces for a specific level
- * @throws Error if circular dependencies are detected or if a workspace depends on a non-existent workspace
- */
-export function sortWorkspacesByLevels<T>(
-  workspaces: Record<string, T>,
-  dependencies: Record<string, string[]>,
-): T[][] {
-  const levels: T[][] = []
-  const workspaceKeys = Object.keys(workspaces)
+export function sortGraphNodesByLevels<T>(nodes: T[], dependencies: (n: T) => T[]): T[][] {
+  const heightsMemo: Record<number, number> = {}
+  const path: number[] = []
 
-  // Calculate in-degrees for each workspace
-  const inDegree: Record<string, number> = {}
-  const adjacencyList: Record<string, string[]> = {}
+  // height(N) = max(height(M)) + 1, where M is every dependency of N
+  const calcHeightRec = (node: number) => {
+    if (heightsMemo[node] !== undefined) {
+      return heightsMemo[node]
+    }
 
-  // Initialize in-degrees and adjacency list
-  for (const workspace of workspaceKeys) {
-    inDegree[workspace] = 0
-    adjacencyList[workspace] = []
-  }
+    if (path.includes(node)) {
+      throw new Error(`Circular dependency detected involving workspaces: ${path.map((p) => nodes[p]).join(', ')}`)
+    }
 
-  // Build adjacency list and calculate in-degrees
-  for (const workspace of workspaceKeys) {
-    const deps = dependencies[workspace] || []
-    for (const dep of deps) {
-      if (!workspaces[dep]) {
-        throw new Error(`Workspace '${workspace}' depends on non-existent workspace '${dep}'`)
+    path.push(node)
+    let max = 0
+    for (const dep of dependencies(nodes[node]) ?? []) {
+      const depNode = nodes.findIndex((x) => x === dep)
+      if (depNode === -1) {
+        throw new Error(`Workspace '${node}' depends on non-existent workspace`)
       }
-      adjacencyList[dep].push(workspace)
-      inDegree[workspace]++
+      max = Math.max(max, calcHeightRec(depNode))
     }
+
+    path.pop()
+
+    return (heightsMemo[node] = max + 1)
   }
+  const levels: T[][] = []
 
-  // Find all workspaces with no dependencies (level 0)
-  const queue: Array<{ workspace: string; level: number }> = []
-  for (const workspace of workspaceKeys) {
-    if (inDegree[workspace] === 0) {
-      queue.push({ workspace, level: 0 })
-    }
-  }
-
-  // Process workspaces level by level
-  let processedCount = 0
-  while (queue.length > 0) {
-    const { workspace, level } = queue.shift()!
-    processedCount++
-
-    // Ensure level array exists
+  for (let i = 0; i < nodes.length; i++) {
+    const level = calcHeightRec(i) - 1
     if (!levels[level]) {
       levels[level] = []
     }
-
-    // Add workspace to current level
-    levels[level].push(workspaces[workspace])
-
-    // Process all workspaces that depend on this one
-    for (const dependent of adjacencyList[workspace]) {
-      inDegree[dependent]--
-      if (inDegree[dependent] === 0) {
-        queue.push({ workspace: dependent, level: level + 1 })
-      }
-    }
-  }
-
-  // Check for circular dependencies
-  if (processedCount !== workspaceKeys.length) {
-    // Find the workspaces involved in circular dependencies
-    const circularWorkspaces: string[] = []
-    for (const workspace of workspaceKeys) {
-      if (inDegree[workspace] > 0) {
-        circularWorkspaces.push(workspace)
-      }
-    }
-    throw new Error(`Circular dependency detected involving workspaces: ${circularWorkspaces.join(', ')}`)
+    levels[level].push(nodes[i])
   }
 
   return levels

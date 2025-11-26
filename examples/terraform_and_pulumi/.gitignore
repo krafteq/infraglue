@@ -41,3 +41,5 @@ Thumbs.db
 
 __ig__backend.tf
 .ig
+
+**/.pulumi/*

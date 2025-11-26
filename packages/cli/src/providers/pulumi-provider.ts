@@ -1,13 +1,13 @@
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { basename, join } from 'path'
+import { basename, join, resolve } from 'path'
 import { access, constants as fsConstants } from 'fs'
-import type { ProviderConfig } from '../core/index.js'
-import type { ProviderInput, ProviderOutput } from './provider.js'
+import type { ProviderConfig, ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary, ChangeAction } from './provider-plan.js'
 import type { IProvider } from './provider.js'
 import type { ExecOptions } from 'node:child_process'
 import { logger } from '../utils/logger.js'
+import { mkdir } from 'fs/promises'
 
 const execAsync = promisify(exec)
 const accessAsync = promisify(access)
@@ -218,6 +218,12 @@ class PulumiProvider implements IProvider {
   }
 
   private async initializePulumi(configuration: ProviderConfig, env: string): Promise<void> {
+    const backendConfig = configuration.envs?.[env]?.backend_config
+    if (backendConfig?.['PULUMI_BACKEND_URL'] && backendConfig['PULUMI_BACKEND_URL'].startsWith('file://')) {
+      const localBackendFolderPath = backendConfig['PULUMI_BACKEND_URL'].substring('file://'.length)
+      await mkdir(resolve(configuration.rootPath, localBackendFolderPath), { recursive: true })
+    }
+
     await this.execCommand('pulumi install', configuration, env)
     try {
       await this.execCommand(`pulumi stack select ${env}`, configuration, env)
@@ -255,13 +261,13 @@ class PulumiProvider implements IProvider {
   }
 
   async execAnyCommand(
-    command: string,
+    command: string[],
     configuration: ProviderConfig,
-    input: ProviderInput,
+    input: () => Promise<ProviderInput>,
     env: string,
   ): Promise<string> {
-    await this.setPulumiConfig(configuration, input, env)
-    return this.execCommand(`pulumi ${command}`, configuration, env)
+    await this.setPulumiConfig(configuration, await input(), env)
+    return this.execCommand(`pulumi ${command.join(' ')}`, configuration, env)
   }
 
   private async execCommand(command: string, configuration: ProviderConfig, env: string): Promise<string> {

@@ -2,12 +2,12 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 import { basename, extname, join } from 'path'
 import { readdir, copyFile, rm, access, constants, writeFile } from 'fs/promises'
-import type { ProviderConfig } from '../core/index.js'
-import type { IProvider } from './provider.js'
+import type { IProvider, ProviderConfig } from './provider.js'
 import type { ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provider-plan.js'
-import { saveTemporalFile } from '../core/state-manager.js'
 import { logger } from '../utils/logger.js'
+import { StateManager } from '../core'
+import { UserError } from '../utils/errors'
 
 const execAsync = promisify(exec)
 
@@ -203,7 +203,6 @@ class TerraformProvider implements IProvider {
       } else if (backendType) {
         await writeFile(BACKEND_CONFIG_FILE, `terraform { \n  backend "${backendType}" {} \n}`)
       } else {
-        logger.warn(`${configuration.alias}:: No backend configuration found for environment ${environment}`)
         if (
           await access(BACKEND_CONFIG_FILE, constants.W_OK)
             .then(() => true)
@@ -224,25 +223,38 @@ class TerraformProvider implements IProvider {
     const variables = Object.entries({ ...vars, ...input }) // TODO: what is more important? or maybe error in case of collision?
       .map(([key, value]) => `${key}="${value}"`)
       .join('\n')
-    const tempVarFile = await saveTemporalFile(
-      configuration.rootMonoRepoFolder,
+    const stateManager = new StateManager(configuration.rootMonoRepoFolder)
+    const tempVarFile = await stateManager.storeWorkspaceTempFile(
       configuration.rootPath,
       'terraform-vars.tfvars',
       variables,
     )
-    const filesStr = var_files?.map((f) => `-var-file=${f}`)?.join(' ') || ''
+    const filesStr = var_files?.map((f: string) => `-var-file=${f}`)?.join(' ') || ''
     return `${filesStr} -var-file=${tempVarFile}`
   }
 
   async execAnyCommand(
-    command: string,
+    command: string[],
     configuration: ProviderConfig,
-    input: ProviderInput,
+    input: () => Promise<ProviderInput>,
     env: string,
   ): Promise<string> {
-    const variables = await this.getVariableString(configuration, input, env)
-    // TODO: command should be before variables, but mb we need to split command into 2 parts: one before vars, one after?
-    return this.execCommand(`terraform ${command} ${variables}`, configuration)
+    const needInputCommands = ['apply', 'destroy', 'plan', 'import', 'refresh']
+    const notSupportedCommands = ['console', 'init', 'workspace', 'test']
+    const tfCommand = command[0]
+    if (notSupportedCommands.includes(tfCommand)) {
+      throw new UserError(`Command "${tfCommand}" is not supported`)
+    }
+
+    const args = ['terraform', tfCommand]
+    if (needInputCommands.includes(tfCommand)) {
+      const variables = await this.getVariableString(configuration, await input(), env)
+      args.push(variables)
+    }
+
+    args.push(...command.slice(1))
+
+    return this.execCommand(args.join(' '), configuration)
   }
 
   private async execCommand(command: string, configuration: ProviderConfig): Promise<string> {
