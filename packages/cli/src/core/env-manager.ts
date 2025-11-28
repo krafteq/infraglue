@@ -28,12 +28,10 @@ export class EnvManager {
 
     await this.stateManager.update((s) => s.startSelectingEnv(env))
 
-    await Promise.all(
-      affectedWorkspaces.map((x) => {
-        const interop = new WorkspaceInterop(this.monorepo, x, env)
-        return interop.selectEnvironment()
-      }),
-    )
+    for (const x of affectedWorkspaces) {
+      const interop = new WorkspaceInterop(this.monorepo, x, env)
+      await interop.selectEnvironment()
+    }
 
     await this.stateManager.update((s) => s.finishEnvSelection(affectedWorkspaces.map((x) => x.name)))
 

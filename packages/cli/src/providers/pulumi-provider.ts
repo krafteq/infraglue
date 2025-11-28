@@ -265,9 +265,9 @@ class PulumiProvider implements IProvider {
     configuration: ProviderConfig,
     input: () => Promise<ProviderInput>,
     env: string,
-  ): Promise<string> {
+  ): Promise<void> {
     await this.setPulumiConfig(configuration, await input(), env)
-    return this.execCommand(`pulumi ${command.join(' ')}`, configuration, env)
+    await this.execCommand(`pulumi ${command.join(' ')}`, configuration, env)
   }
 
   private async execCommand(command: string, configuration: ProviderConfig, env: string): Promise<string> {

@@ -64,13 +64,14 @@ export class WorkspaceInterop {
     await this.storeOutputs(null)
     logger.info(`Selecting environment for ${this.workspace.name}`)
     await this.provider.selectEnvironment(this.providerConfig(), this.env)
+    logger.info(`Selected environment for ${this.workspace.name}`)
   }
 
   public existsInFolder(folderPath: string): Promise<boolean> {
     return this.provider.existsInFolder(folderPath)
   }
 
-  public execAnyCommand(command: string[], input: () => Promise<ProviderInput>): Promise<string> {
+  public execAnyCommand(command: string[], input: () => Promise<ProviderInput>): Promise<void> {
     return this.provider.execAnyCommand(command, this.providerConfig(), input, this.env)
   }
 

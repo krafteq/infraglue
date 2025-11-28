@@ -32,9 +32,8 @@
   "license": "MIT",
   "dependencies": {
     "commander": "^14.0.0",
-    "tsx": "^4.20.3",
-    "yaml": "^2.8.0",
-    "glob": "^11.0.3"
+    "yaml": "^2.8.1",
+    "glob": "^11.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -42,6 +41,7 @@
     "typescript": "^5.8.3",
     "cross-env": "^7.0.3",
     "jest": "^30.0.4",
+    "tsx": "^4.20.3",
     "ts-jest": "^29.4.0",
     "@types/jest": "^30.0.0"
   },

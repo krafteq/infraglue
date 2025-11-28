@@ -163,9 +163,7 @@ program
 
     const executionCtx = new ExecutionContext(monorepo, ws, true, false, env)
 
-    const stdout = await executionCtx.interop(ws).execAnyCommand(args, () => executionCtx.getInputs(ws))
-
-    process.stdout.write(stdout)
+    await executionCtx.interop(ws).execAnyCommand(args, () => executionCtx.getInputs(ws))
   })
 
 async function resolveEnv(env?: string | undefined): Promise<string> {

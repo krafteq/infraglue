@@ -35,7 +35,7 @@ class MockProvider implements IProvider {
     config: ProviderConfig,
     input: () => Promise<ProviderInput>,
     env: string,
-  ): Promise<string> {
+  ): Promise<void> {
     throw new Error('Method not implemented.')
   }
 }

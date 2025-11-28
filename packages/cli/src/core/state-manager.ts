@@ -1,12 +1,14 @@
 import { join, relative } from 'path'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import type { IState, IWorkspaceState } from './state-files'
+import { Mutex } from '../utils/mutex'
 
 const STATE_FILE_DIR = '.ig'
 const STATE_FILE_NAME = `state.json`
 const TEMPORAL_FILE_DIR = '.temp'
 const GIT_IGNORE_FILE_NAME = '.gitignore'
 const STATE_FILE_ENCODING = 'utf-8'
+const mutex = new Mutex()
 
 export class StateManager {
   private readonly stateFilePath: string
@@ -31,10 +33,14 @@ export class StateManager {
   }
 
   public async update(func: (s: State) => void): Promise<void> {
-    // todo: implement locking mechanism if needed
-    const state = await this.read()
-    func(state)
-    await this.writeInternalState(state.serialize())
+    const unlock = await mutex.lock()
+    try {
+      const state = await this.read()
+      func(state)
+      await this.writeInternalState(state.serialize())
+    } finally {
+      unlock()
+    }
   }
 
   // TODO: extract temp file mangement from here

@@ -8,8 +8,10 @@ import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provide
 import { logger } from '../utils/logger.js'
 import { StateManager } from '../core'
 import { UserError } from '../utils/errors'
+import { spawn } from 'node:child_process'
 
 const execAsync = promisify(exec)
+const spawnAsync = promisify(spawn)
 
 class TerraformProvider implements IProvider {
   getProviderName(): string {
@@ -238,9 +240,9 @@ class TerraformProvider implements IProvider {
     configuration: ProviderConfig,
     input: () => Promise<ProviderInput>,
     env: string,
-  ): Promise<string> {
+  ): Promise<void> {
     const needInputCommands = ['apply', 'destroy', 'plan', 'import', 'refresh']
-    const notSupportedCommands = ['console', 'init', 'workspace', 'test']
+    const notSupportedCommands = ['console', 'workspace', 'test']
     const tfCommand = command[0]
     if (notSupportedCommands.includes(tfCommand)) {
       throw new UserError(`Command "${tfCommand}" is not supported`)
@@ -254,7 +256,15 @@ class TerraformProvider implements IProvider {
 
     args.push(...command.slice(1))
 
-    return this.execCommand(args.join(' '), configuration)
+    await this.execCommandInteractive(args.join(' '), configuration)
+  }
+
+  private async execCommandInteractive(command: string, configuration: ProviderConfig): Promise<void> {
+    logger.debug(`[terraform] exec: ${command}\n  cwd: ${configuration.rootPath}`)
+    await spawnAsync(command, [], {
+      shell: true,
+      stdio: 'inherit',
+    })
   }
 
   private async execCommand(command: string, configuration: ProviderConfig): Promise<string> {

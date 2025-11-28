@@ -48,5 +48,5 @@ export interface IProvider {
     configuration: ProviderConfig,
     input: () => Promise<ProviderInput>,
     env: string,
-  ): Promise<string>
+  ): Promise<void>
 }
