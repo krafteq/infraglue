@@ -1,7 +1,7 @@
-import { type Monorepo, Workspace } from './model'
-import type { IProvider, ProviderConfig, ProviderInput, ProviderOutput, ProviderPlan } from '../providers'
-import { StateManager } from './state-manager'
-import { logger } from '../utils/logger'
+import { type Monorepo, Workspace } from './model.js'
+import type { IProvider, ProviderConfig, ProviderInput, ProviderOutput, ProviderPlan } from '../providers/index.js'
+import { StateManager } from './state-manager.js'
+import { logger } from '../utils/index.js'
 
 /*
   Calls provider commands on Workspace

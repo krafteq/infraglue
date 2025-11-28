@@ -1,13 +1,12 @@
-import { Monorepo, Workspace } from './model'
+import { Monorepo, Workspace } from './model.js'
 import { readFile } from 'fs/promises'
 import { dirname, join, relative, resolve } from 'path'
 import { parse as parseYaml } from 'yaml'
 import { glob } from 'glob'
-import type { MonorepoConfig, WorkspaceConfig } from './config-files'
-import { globalConfig } from './global-config'
-import { logger } from '../utils/logger'
-import { getProvider, providers as knownProviders } from '../providers'
-import { UserError } from '../utils/errors'
+import type { MonorepoConfig, WorkspaceConfig } from './config-files.js'
+import { globalConfig } from './global-config.js'
+import { logger, UserError } from '../utils/index.js'
+import { getProvider, providers as knownProviders } from '../providers/index.js'
 
 const CONFIG_FILE_NAMES = ['ig.yaml', 'ig.yml']
 const DEFAULT_ENCODING = 'utf-8'

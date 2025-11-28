@@ -1,8 +1,7 @@
-import { StateManager } from './state-manager'
-import { Monorepo } from './model'
-import { logger } from '../utils/logger'
-import { UserError } from '../utils/errors'
-import { WorkspaceInterop } from './workspace-interop'
+import { StateManager } from './state-manager.js'
+import { Monorepo } from './model.js'
+import { logger, UserError } from '../utils/index.js'
+import { WorkspaceInterop } from './workspace-interop.js'
 
 export class EnvManager {
   private readonly stateManager: StateManager

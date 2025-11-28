@@ -1,8 +1,8 @@
 // global monorepo context, no workspace is selected
-import type { EnvironmentConfig, IProvider } from '../providers'
-import { sortGraphNodesByLevels } from '../utils'
-import type { MonorepoConfig } from './config-files'
-import { WorkspaceInterop } from './workspace-interop'
+import type { EnvironmentConfig, IProvider } from '../providers/index.js'
+import { sortGraphNodesByLevels } from '../utils/index.js'
+import type { MonorepoConfig } from './config-files.js'
+import { WorkspaceInterop } from './workspace-interop.js'
 
 export class ExecutionContext {
   public readonly workspaceOutputs: AppliedWorkspace[] = []

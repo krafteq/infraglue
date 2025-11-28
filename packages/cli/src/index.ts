@@ -3,16 +3,19 @@
 import { Command } from 'commander'
 import { dirname, join, resolve } from 'path'
 import { readFile } from 'fs/promises'
-import { globalConfig } from './core/index.js'
+import {
+  globalConfig,
+  EnvManager,
+  ExecutionContext,
+  tryResolveMonorepo,
+  MultistageExecutor,
+  type Monorepo,
+  type Workspace,
+} from './core/index.js'
 import { fileURLToPath } from 'url'
 import { getFormatter } from './formatters/index.js'
 import { getIntegration } from './integrations/index.js'
-import { logger } from './utils/logger.js'
-import { tryResolveMonorepo } from './core/monorepo-reader'
-import { ExecutionContext, Monorepo, Workspace } from './core/model'
-import { MultistageExecutor } from './core/multistage-executor'
-import { UserError } from './utils/errors'
-import { EnvManager } from './core/env-manager'
+import { logger, UserError } from './utils/index.js'
 
 export async function getPackageJsonVersion(): Promise<string> {
   const __filename = fileURLToPath(import.meta.url)

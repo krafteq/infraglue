@@ -1,16 +1,15 @@
-import { type ExecutionContext, ExecutionPlanBuilder, Workspace } from './model'
-import { StateManager } from './state-manager'
-import { logger } from '../utils/logger'
-import { UserError } from '../utils/errors'
+import { type ExecutionContext, ExecutionPlanBuilder, Workspace } from './model.js'
+import { StateManager } from './state-manager.js'
+import { logger, UserError } from '../utils/index.js'
 import {
   type ChangeSummary,
   hasChanges,
   type ProviderInput,
   type ProviderOutput,
   type ProviderPlan,
-} from '../providers'
-import type { IIntegration } from '../integrations/integration'
-import type { IFormatter } from '../formatters/formatter'
+} from '../providers/index.js'
+import type { IIntegration } from '../integrations/integration.js'
+import type { IFormatter } from '../formatters/formatter.js'
 
 export class MultistageExecutor {
   private readonly stateManager: StateManager

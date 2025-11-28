@@ -5,9 +5,8 @@ import { readdir, copyFile, rm, access, constants, writeFile } from 'fs/promises
 import type { IProvider, ProviderConfig } from './provider.js'
 import type { ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provider-plan.js'
-import { logger } from '../utils/logger.js'
-import { StateManager } from '../core'
-import { UserError } from '../utils/errors'
+import { logger, UserError } from '../utils/index.js'
+import { StateManager } from '../core/index.js'
 import { spawn } from 'node:child_process'
 
 const execAsync = promisify(exec)

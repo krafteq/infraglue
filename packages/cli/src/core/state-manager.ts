@@ -1,7 +1,7 @@
 import { join, relative } from 'path'
 import { readFile, writeFile, mkdir } from 'fs/promises'
-import type { IState, IWorkspaceState } from './state-files'
-import { Mutex } from '../utils/mutex'
+import type { IState, IWorkspaceState } from './state-files.js'
+import { Mutex } from '../utils/index.js'
 
 const STATE_FILE_DIR = '.ig'
 const STATE_FILE_NAME = `state.json`
