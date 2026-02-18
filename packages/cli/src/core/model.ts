@@ -116,7 +116,8 @@ export class Monorepo {
   public getWorkspace(key: string) {
     const ws = this.findWorkspace(key)
     if (ws === null) {
-      throw new Error(`Workspace not found: ${key}`)
+      const available = this.workspaces.map((w) => w.name).join(', ')
+      throw new Error(`Workspace '${key}' not found. Available: ${available}`)
     }
     return ws
   }

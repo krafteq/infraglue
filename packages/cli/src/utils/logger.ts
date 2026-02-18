@@ -1,3 +1,5 @@
+import pc from 'picocolors'
+
 type Level = 'silent' | 'error' | 'warn' | 'info' | 'debug'
 
 const order: Record<Level, number> = {
@@ -29,8 +31,8 @@ class Logger {
 
   private write(level: Level, msg: string) {
     if (!this.should(level)) return
-
-    process.stderr.write(`${msg}\n`)
+    const colored = level === 'error' ? pc.red(msg) : level === 'warn' ? pc.yellow(msg) : msg
+    process.stderr.write(`${colored}\n`)
   }
 
   error(msg: string) {

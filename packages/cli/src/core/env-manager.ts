@@ -40,7 +40,7 @@ export class EnvManager {
   public async selectedEnv(): Promise<string | undefined> {
     const state = await this.stateManager.read()
     if (!state.isEnvSelected) {
-      throw new UserError(`No environment selected`)
+      throw new UserError("No environment selected. Run 'ig env select <env>' first.")
     }
     return state.env
   }
