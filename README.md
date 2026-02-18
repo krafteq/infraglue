@@ -200,6 +200,40 @@ pnpm ts:check            # typecheck
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 
+## Releasing
+
+Releases are managed with [changesets](https://github.com/changesets/changesets) and automated via GitHub Actions.
+
+### Standard release
+
+1. **Add a changeset** when making changes that should be released:
+
+   ```bash
+   pnpm changeset
+   ```
+
+   Select `@krafteq/infraglue`, pick the semver bump (patch/minor/major), and write a summary.
+
+2. **Commit the changeset file** (`.changeset/<random-name>.md`) with your PR.
+
+3. **Merge your PR to `master`**. The release action will create a "chore: version packages" PR that bumps `package.json` version and updates `CHANGELOG.md`.
+
+4. **Merge the version PR**. This triggers `pnpm release`, which builds and publishes to npm with provenance.
+
+### Canary release (for testing)
+
+To publish a canary version from a PR for testing before merging:
+
+1. Add the `canary` label to the PR on GitHub.
+2. The canary workflow publishes to npm under the `canary` dist-tag.
+3. Install it with:
+
+   ```bash
+   npm install -g @krafteq/infraglue@canary
+   ```
+
+4. To publish a new canary, remove and re-add the `canary` label.
+
 ## License
 
 MIT
