@@ -12,9 +12,13 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "commit": "cz",
-    "publish": "cross-env GITLAB_NPM_TOKEN=${GITLAB_NPM_TOKEN} pnpm -r publish",
-    "test": "jest",
-    "test:watch": "jest --watch",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "cd packages/cli && pnpm build && changeset publish --provenance",
+    "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:all": "vitest run --config vitest.all.config.ts",
+    "test:watch": "vitest",
     "ts:check": "pnpm -r ts:check",
     "apply": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts apply -d ./examples/terraform_and_pulumi/",
     "destroy": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./packages/cli/src/index.ts destroy -d ./examples/terraform_and_pulumi/",
@@ -48,7 +52,7 @@
     "@eslint/js": "^9.29.0",
     "@eslint/json": "^0.12.0",
     "@eslint/markdown": "^6.6.0",
-    "@types/jest": "^30.0.0",
+    "@changesets/cli": "^2.28.0",
     "commitizen": "^4.3.1",
     "cz-conventional-changelog": "^3.3.0",
     "eslint": "^9.29.0",
@@ -56,19 +60,12 @@
     "eslint-plugin-prettier": "^5.5.0",
     "globals": "^16.2.0",
     "husky": "^9.1.7",
-    "jest": "^30.0.4",
+    "vitest": "^3.1.0",
     "lint-staged": "^16.1.2",
     "prettier": "^3.5.3",
     "tsx": "^4.20.3",
-    "ts-jest": "^29.4.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.34.1",
     "cross-env": "^7.0.3"
-  },
-  "pnpm": {
-    "overrides": {
-      "glob": "^11.0.3",
-      "inflight": "^2.0.0"
-    }
   }
 }
