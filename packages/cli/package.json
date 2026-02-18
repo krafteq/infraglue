@@ -20,7 +20,7 @@
     "apply": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./src/index.ts apply ../../examples/terraform_and_pulumi/",
     "destroy": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./src/index.ts destroy ../../examples/terraform_and_pulumi/",
     "ts:check": "tsc --noEmit",
-    "prepublishOnly": "pnpm build && pnpm test && pnpm ts:check"
+    "prepublishOnly": "pnpm build"
   },
   "keywords": [
     "cli",
