@@ -2,11 +2,12 @@ import { Monorepo, Workspace } from './model.js'
 import { readFile } from 'fs/promises'
 import { dirname, join, relative, resolve } from 'path'
 import { parse as parseYaml } from 'yaml'
-import { glob } from 'glob'
+import { glob } from 'node:fs/promises'
 import type { MonorepoConfig, WorkspaceConfig } from './config-files.js'
 import { globalConfig } from './global-config.js'
-import { logger, UserError } from '../utils/index.js'
+import { logger, UserError, ConfigError } from '../utils/index.js'
 import { getProvider, providers as knownProviders } from '../providers/index.js'
+import { monorepoConfigSchema, workspaceConfigSchema, formatZodError } from './schemas.js'
 
 const CONFIG_FILE_NAMES = ['ig.yaml', 'ig.yml']
 const DEFAULT_ENCODING = 'utf-8'
@@ -34,8 +35,14 @@ export async function tryResolveMonorepo(startPath: string): Promise<Monorepo | 
 }
 
 export async function tryReadMonorepo(rootPath: string): Promise<Monorepo | null> {
-  const cfg = await readConfigFile<MonorepoConfig>(rootPath)
-  if (cfg && cfg.workspace && cfg.workspace.length > 0) {
+  const raw = await readConfigFile(rootPath)
+  if (raw && Array.isArray(raw.workspace) && raw.workspace.length > 0) {
+    const parsed = monorepoConfigSchema.safeParse(raw)
+    if (!parsed.success) {
+      const configPath = CONFIG_FILE_NAMES.map((n) => join(rootPath, n)).join(' or ')
+      throw new ConfigError(formatZodError(parsed.error), configPath)
+    }
+    const cfg = raw as MonorepoConfig
     const workspaces = await readWorkspaces(cfg, rootPath)
 
     const exports = Object.entries(cfg.output || {}).map(([key, value]) => {
@@ -49,14 +56,14 @@ export async function tryReadMonorepo(rootPath: string): Promise<Monorepo | null
   return null
 }
 
-async function readConfigFile<T>(dirPath: string): Promise<T | null> {
+async function readConfigFile(dirPath: string): Promise<Record<string, unknown> | null> {
   for (const candidate of CONFIG_FILE_NAMES) {
     try {
       const content = await readFile(join(dirPath, candidate), DEFAULT_ENCODING)
-      return parseYaml(content) as T
+      return parseYaml(content) as Record<string, unknown> | null
     } catch (error) {
       if (!(error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT')) {
-        throw new Error(`Error reading config file ${join(dirPath, candidate)}: ${error}`)
+        throw new ConfigError(`Failed to parse YAML: ${error}`, join(dirPath, candidate))
       }
     }
   }
@@ -69,11 +76,12 @@ async function readWorkspaces(monorepoConfig: MonorepoConfig, rootPath: string):
   }
 
   const workspacePaths = await Promise.all(
-    monorepoConfig.workspace.map(async (workspace) => {
-      const paths = await glob(workspace.endsWith('/') ? workspace : `${workspace}/`, {
-        cwd: rootPath,
-        absolute: true,
-      })
+    monorepoConfig.workspace.map(async (pattern) => {
+      const globPattern = pattern.endsWith('/') ? pattern : `${pattern}/`
+      const paths: string[] = []
+      for await (const entry of glob(globPattern, { cwd: rootPath })) {
+        paths.push(resolve(rootPath, entry))
+      }
       return paths
     }),
   )
@@ -82,11 +90,19 @@ async function readWorkspaces(monorepoConfig: MonorepoConfig, rootPath: string):
 }
 
 async function getWorkspace(path: string, rootPath: string): Promise<Workspace | null> {
-  const config = await readConfigFile<WorkspaceConfig>(path)
+  const raw = await readConfigFile(path)
+  if (raw) {
+    const parsed = workspaceConfigSchema.safeParse(raw)
+    if (!parsed.success) {
+      const configPath = CONFIG_FILE_NAMES.map((n) => join(path, n)).join(' or ')
+      throw new ConfigError(formatZodError(parsed.error), configPath)
+    }
+  }
+  const config = raw as WorkspaceConfig | null
   const provider = config?.provider || (await detectProvider(path))
   if (!provider) {
     if (globalConfig.strict) {
-      throw new Error(`No provider found in ${path}`)
+      throw new ConfigError('Cannot detect provider. Expected main.tf (Terraform) or Pulumi.yaml (Pulumi).', path)
     } else {
       logger.warn(`No provider found in ${path}. Skipping.`)
       return null
@@ -95,7 +111,7 @@ async function getWorkspace(path: string, rootPath: string): Promise<Workspace |
 
   const providerInstance = getProvider(provider)
   if (!providerInstance) {
-    throw new UserError(`Unknown provider ${provider}`)
+    throw new UserError(`Unknown provider '${provider}' in ${path}. Supported: terraform, pulumi.`)
   }
 
   return new Workspace(
