@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Command } from 'commander'
+import { Command, Help } from 'commander'
 import { dirname, join, resolve } from 'path'
 import { readFile } from 'fs/promises'
 import {
@@ -15,7 +15,9 @@ import {
 import { fileURLToPath } from 'url'
 import { getFormatter } from './formatters/index.js'
 import { getIntegration } from './integrations/index.js'
-import { logger, UserError } from './utils/index.js'
+import { logger, UserError, IgError, isDebug, formatUnexpectedError, detectIntegration } from './utils/index.js'
+import { generateBashCompletion, generateZshCompletion, generateFishCompletion } from './completions.js'
+import pc from 'picocolors'
 
 export async function getPackageJsonVersion(): Promise<string> {
   const __filename = fileURLToPath(import.meta.url)
@@ -44,7 +46,7 @@ program
   .description('CLI tool for infra-glue')
   .version(await getPackageJsonVersion())
   .hook('preAction', async (command) => {
-    if (command.opts().verbose) {
+    if (command.opts().verbose || isDebug()) {
       logger.setVerbose()
     }
     if (command.opts().quiet) {
@@ -115,7 +117,7 @@ for (const execCmd of execCommands) {
 
       await new MultistageExecutor(execContext).exec({
         approve: approve,
-        integration: getIntegration(integration),
+        integration: getIntegration(detectIntegration(integration)),
         formatter: getFormatter(format),
         preview: false,
       })
@@ -137,22 +139,34 @@ configCommand
   .description('Parse and show platform configuration for a directory')
   .option('-j, --json', 'Output in JSON format')
   .action(async (options: { json?: boolean }) => {
-    try {
-      logger.info(`Analyzing platform configuration in: ${currentDir}`)
+    logger.info(`Analyzing platform configuration in: ${currentDir}`)
 
-      if (!monorepo) {
-        logger.info('No platform configuration found')
-        return
-      }
-
+    if (!monorepo) {
       if (options.json) {
-        logger.info(JSON.stringify(monorepo.configFile, null, 2))
+        process.stdout.write(JSON.stringify({ monorepo: null }, null, 2) + '\n')
       } else {
-        displayPlatformInfo(monorepo)
+        logger.info('No platform configuration found')
       }
-    } catch (error) {
-      console.error('Error:', error instanceof Error ? error.message : error)
-      process.exit(1)
+      return
+    }
+
+    if (options.json) {
+      const result = {
+        monorepo: {
+          root: monorepo.path,
+          workspaces: monorepo.workspaces.map((ws) => ({
+            name: ws.name,
+            path: ws.path,
+            provider: ws.providerName,
+            dependencies: ws.allDependsOn,
+          })),
+          outputs: monorepo.exports,
+          config: monorepo.configFile,
+        },
+      }
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n')
+    } else {
+      displayPlatformInfo(monorepo)
     }
   })
 
@@ -169,6 +183,69 @@ program
     await executionCtx.interop(ws).execAnyCommand(args, () => executionCtx.getInputs(ws))
   })
 
+program
+  .command('completion')
+  .description('Output shell completion script')
+  .argument('<shell>', 'Shell type: bash, zsh, or fish')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ ig completion bash >> ~/.bashrc
+  $ ig completion zsh >> ~/.zshrc
+  $ ig completion fish > ~/.config/fish/completions/ig.fish
+  $ eval "$(ig completion bash)"`,
+  )
+  .action((shell: string) => {
+    switch (shell) {
+      case 'bash':
+        process.stdout.write(generateBashCompletion() + '\n')
+        break
+      case 'zsh':
+        process.stdout.write(generateZshCompletion() + '\n')
+        break
+      case 'fish':
+        process.stdout.write(generateFishCompletion() + '\n')
+        break
+      default:
+        throw new UserError(`Unknown shell '${shell}'. Supported: bash, zsh, fish.`)
+    }
+  })
+
+// Enhanced help
+for (const execCmd of execCommands) {
+  const cmd = program.commands.find((c) => c.name() === execCmd.name)
+  cmd?.addHelpText(
+    'after',
+    `
+Examples:
+  $ ig ${execCmd.name} --env staging
+  $ ig ${execCmd.name} --env production --approve 1
+  $ ig ${execCmd.name} --env dev --project postgres`,
+  )
+}
+
+program.addHelpText(
+  'after',
+  `
+Documentation: https://github.com/krafteq/infraglue
+Report bugs:   https://github.com/krafteq/infraglue/issues`,
+)
+
+program.configureHelp({
+  formatHelp: (cmd, helper) => {
+    const defaultHelp = Help.prototype.formatHelp.call(helper, cmd, helper)
+    if (process.stderr.isTTY) {
+      return defaultHelp
+        .replace(/^Usage:/m, pc.bold('Usage:'))
+        .replace(/^Commands:/m, pc.bold('Commands:'))
+        .replace(/^Options:/m, pc.bold('Options:'))
+        .replace(/^Arguments:/m, pc.bold('Arguments:'))
+    }
+    return defaultHelp
+  },
+})
+
 async function resolveEnv(env?: string | undefined): Promise<string> {
   if (env) {
     await new EnvManager(requireMonorepo()).selectEnv(env)
@@ -176,7 +253,7 @@ async function resolveEnv(env?: string | undefined): Promise<string> {
   } else {
     const currentEnv = await new EnvManager(requireMonorepo()).selectedEnv()
     if (!currentEnv) {
-      throw new UserError('No environment selected')
+      throw new UserError("No environment selected. Run 'ig env select <env>' or pass --env <env>.")
     }
     return currentEnv
   }
@@ -185,7 +262,7 @@ async function resolveEnv(env?: string | undefined): Promise<string> {
 function requireMonorepo(): Monorepo {
   if (monorepo === null) {
     throw new UserError(
-      `Monorepo not found. Ensure there is ig.yml file describing with 'workspace' field present in ${currentDir}`,
+      `Monorepo not found in ${currentDir}. Ensure there is an ig.yaml file with a 'workspace' field.`,
     )
   }
   return monorepo
@@ -207,33 +284,33 @@ function requireCurrentWorkspace(project?: string | undefined): Workspace {
   const ws = currentWorkspace(project)
   if (!ws) {
     throw new UserError(
-      `Single workspace is required. Either run a command from workspace directory or pass --project argument`,
+      `Single workspace is required. Run this command from a workspace directory or pass --project <name>.`,
     )
   }
   return ws
 }
 
 function displayPlatformInfo(monorepo: Monorepo) {
-  logger.info('\n📋 Platform Configuration Summary')
+  logger.info(`\n${pc.bold('Platform Configuration Summary')}`)
   logger.info('=====================================')
 
   if (monorepo.workspaces.length > 0) {
-    logger.info(`\n📁 Workspaces (${monorepo.workspaces.length}):`)
+    logger.info(`\n${pc.bold(`Workspaces (${monorepo.workspaces.length})`)}:`)
     monorepo.workspaces.forEach((workspace) => {
-      logger.info(`  • ${workspace.name} (${workspace.providerName})`)
+      logger.info(`  • ${pc.cyan(workspace.name)} ${pc.dim(`(${workspace.providerName})`)}`)
     })
   } else {
-    logger.info('\n📁 No workspaces found')
+    logger.info('\nNo workspaces found')
   }
 
   if (monorepo.exports && monorepo.exports.length > 0) {
-    logger.info(`\n📤 Outputs (${monorepo.exports.length}):`)
+    logger.info(`\n${pc.bold(`Outputs (${monorepo.exports.length})`)}:`)
     monorepo.exports.forEach((exp) => {
-      logger.info(`  • ${exp.name} ← ${exp.workspace}:${exp.key}`)
+      logger.info(`  • ${exp.name} ${pc.dim('←')} ${exp.workspace}:${exp.key}`)
     })
   }
 
-  logger.debug('\n🔍 Detailed Information:')
+  logger.debug('\nDetailed Information:')
   logger.debug(JSON.stringify(monorepo.configFile, null, 2))
 }
 
@@ -242,6 +319,10 @@ if (process.env['__DEV_CWD']) {
   logger.debug(`chdir ${process.env['__DEV_CWD']}`)
   process.chdir(process.env['__DEV_CWD'])
 }
+
+process.on('SIGINT', () => {
+  process.exit(130)
+})
 
 process.on('uncaughtException', (err) => {
   handleError(err)
@@ -253,18 +334,26 @@ process.on('unhandledRejection', (err) => {
   } else throw err
 })
 
+let packageVersion: string | undefined
+
 function handleError(err: Error) {
-  if (err instanceof UserError) {
-    logger.error(err.message)
-    process.exit(2)
+  if (err instanceof IgError) {
+    logger.error(pc.red(err.message))
+    if (isDebug() && err.stack) {
+      logger.error(pc.dim(err.stack))
+    }
+    process.exit(err.exitCode)
   }
 
-  if (!logger.isVerbose()) {
-    logger.error(err.message)
-    process.exit(1)
-  }
-
-  throw err
+  const version = packageVersion ?? 'unknown'
+  logger.error(pc.red(formatUnexpectedError(err, version)))
+  process.exit(1)
 }
+
+getPackageJsonVersion()
+  .then((v) => {
+    packageVersion = v
+  })
+  .catch(() => {})
 
 program.parse()
