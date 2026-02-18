@@ -1,0 +1,47 @@
+name: Canary Release
+
+on:
+  pull_request:
+    types: [labeled]
+
+concurrency:
+  group: canary-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    if: github.event.label.name == 'canary'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: cd packages/cli && pnpm build
+
+      - name: Version canary
+        run: pnpm changeset version --snapshot canary
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish canary
+        run: pnpm changeset publish --tag canary
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN_PUBLISH }}
