@@ -1,0 +1,6 @@
+depends_on:
+  - '../ws-a'
+
+envs:
+  dev:
+    backend_type: local

@@ -1,0 +1,6 @@
+injection:
+  shared_value: '../producer:shared_value'
+
+envs:
+  dev:
+    backend_type: local

@@ -1,0 +1,7 @@
+envs:
+  dev:
+    backend_config:
+      PULUMI_BACKEND_URL: file://./.pulumi/dev
+      PULUMI_CONFIG_PASSPHRASE: ''
+    vars:
+      network_name: dev_network
