@@ -6,7 +6,7 @@ import type { ProviderConfig, ProviderInput, ProviderOutput } from './provider.j
 import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary, ChangeAction } from './provider-plan.js'
 import type { IProvider } from './provider.js'
 import type { ExecOptions } from 'node:child_process'
-import { logger } from '../utils/logger.js'
+import { logger, UserError, ProviderError } from '../utils/index.js'
 import { mkdir } from 'fs/promises'
 
 const execAsync = promisify(exec)
@@ -96,124 +96,17 @@ class PulumiProvider implements IProvider {
     }
   }
 
-  /**
-   * Maps Pulumi JSON output to the common ProviderPlan structure
-   * This encapsulates all Pulumi-specific parsing logic
-   */
   private mapPulumiOutputToProviderPlan(pulumiOutput: string, projectName: string): ProviderPlan {
-    const resourceChanges: Array<ResourceChange> = []
-    const outputs: Array<Output> = []
-    const diagnostics: Array<Diagnostic> = []
-    let changeSummary: ChangeSummary = {
-      add: 0,
-      change: 0,
-      remove: 0,
-      replace: 0,
-      outputUpdates: 0,
-    }
-
-    const previewResult = JSON.parse(pulumiOutput)
-
-    // Process resource changes from steps
-    if (previewResult.steps) {
-      for (const step of previewResult.steps) {
-        const urn = step.urn
-        const urnParts = urn.split('::')
-        const resourceType = urnParts[urnParts.length - 2] || 'unknown'
-        const resourceName = urnParts.pop() || 'unknown'
-
-        // Map Pulumi operations to our change actions
-        let actions: Array<ChangeAction> = []
-        switch (step.op) {
-          case 'create':
-            actions = ['create']
-            changeSummary = {
-              add: changeSummary.add + 1,
-              change: changeSummary.change,
-              remove: changeSummary.remove,
-              replace: changeSummary.replace,
-              outputUpdates: 0,
-            }
-            break
-          case 'update':
-            actions = ['update']
-            changeSummary = {
-              add: changeSummary.add,
-              change: changeSummary.change + 1,
-              remove: changeSummary.remove,
-              replace: changeSummary.replace,
-              outputUpdates: 0,
-            }
-            break
-          case 'delete':
-            actions = ['delete']
-            changeSummary = {
-              add: changeSummary.add,
-              change: changeSummary.change,
-              remove: changeSummary.remove + 1,
-              replace: changeSummary.replace,
-              outputUpdates: 0,
-            }
-            break
-          case 'replace':
-            actions = ['replace']
-            changeSummary = {
-              add: changeSummary.add,
-              change: changeSummary.change,
-              remove: changeSummary.remove,
-              replace: changeSummary.replace + 1,
-              outputUpdates: 0,
-            }
-            break
-          case 'same':
-            actions = ['no-op']
-            break
-          default:
-            actions = [step.op as ChangeAction]
-        }
-
-        resourceChanges.push({
-          address: urn,
-          type: resourceType,
-          name: resourceName,
-          actions,
-          status: 'pending',
-          before: null,
-          after: step.resource?.properties || null,
-          metadata: {},
-        })
-      }
-    }
-
-    // Process outputs
-    if (previewResult.outputs) {
-      for (const [name, value] of Object.entries(previewResult.outputs)) {
-        outputs.push({
-          name,
-          value: typeof value === 'string' ? value : JSON.stringify(value),
-          sensitive: false,
-          description: null,
-        })
-      }
-    }
-
-    return {
-      provider: 'pulumi',
-      projectName,
-      timestamp: new Date(),
-      resourceChanges,
-      outputs,
-      diagnostics,
-      changeSummary,
-      metadata: { rawOutput: pulumiOutput },
-    }
+    return parsePulumiPreviewOutput(pulumiOutput, projectName)
   }
 
   private async checkPulumiInstallation(): Promise<void> {
     try {
       await execAsync('pulumi version')
     } catch {
-      throw new Error('Pulumi is not installed or not available in PATH')
+      throw new UserError(
+        'Pulumi is not installed or not available in PATH. Install it from https://www.pulumi.com/docs/install/',
+      )
     }
   }
 
@@ -295,7 +188,7 @@ class PulumiProvider implements IProvider {
           `Error stderr: ${err.stderr}`,
           `Error stdout: ${err.stdout}`,
         ]
-        throw new Error(messageParts.join('\n\t'))
+        throw new ProviderError(messageParts.join('\n\t'), 'pulumi', configuration.alias)
       }
       throw error
     }
@@ -303,3 +196,109 @@ class PulumiProvider implements IProvider {
 }
 
 export const pulumiProvider = new PulumiProvider() as IProvider
+
+export function parsePulumiPreviewOutput(pulumiOutput: string, projectName: string): ProviderPlan {
+  const resourceChanges: Array<ResourceChange> = []
+  const outputs: Array<Output> = []
+  const diagnostics: Array<Diagnostic> = []
+  let changeSummary: ChangeSummary = {
+    add: 0,
+    change: 0,
+    remove: 0,
+    replace: 0,
+    outputUpdates: 0,
+  }
+
+  const previewResult = JSON.parse(pulumiOutput)
+
+  if (previewResult.steps) {
+    for (const step of previewResult.steps) {
+      const urn = step.urn
+      const urnParts = urn.split('::')
+      const resourceType = urnParts[urnParts.length - 2] || 'unknown'
+      const resourceName = urnParts.pop() || 'unknown'
+
+      let actions: Array<ChangeAction> = []
+      switch (step.op) {
+        case 'create':
+          actions = ['create']
+          changeSummary = {
+            add: changeSummary.add + 1,
+            change: changeSummary.change,
+            remove: changeSummary.remove,
+            replace: changeSummary.replace,
+            outputUpdates: 0,
+          }
+          break
+        case 'update':
+          actions = ['update']
+          changeSummary = {
+            add: changeSummary.add,
+            change: changeSummary.change + 1,
+            remove: changeSummary.remove,
+            replace: changeSummary.replace,
+            outputUpdates: 0,
+          }
+          break
+        case 'delete':
+          actions = ['delete']
+          changeSummary = {
+            add: changeSummary.add,
+            change: changeSummary.change,
+            remove: changeSummary.remove + 1,
+            replace: changeSummary.replace,
+            outputUpdates: 0,
+          }
+          break
+        case 'replace':
+          actions = ['replace']
+          changeSummary = {
+            add: changeSummary.add,
+            change: changeSummary.change,
+            remove: changeSummary.remove,
+            replace: changeSummary.replace + 1,
+            outputUpdates: 0,
+          }
+          break
+        case 'same':
+          actions = ['no-op']
+          break
+        default:
+          actions = [step.op as ChangeAction]
+      }
+
+      resourceChanges.push({
+        address: urn,
+        type: resourceType,
+        name: resourceName,
+        actions,
+        status: 'pending',
+        before: null,
+        after: step.resource?.properties || null,
+        metadata: {},
+      })
+    }
+  }
+
+  if (previewResult.outputs) {
+    for (const [name, value] of Object.entries(previewResult.outputs)) {
+      outputs.push({
+        name,
+        value: typeof value === 'string' ? value : JSON.stringify(value),
+        sensitive: false,
+        description: null,
+      })
+    }
+  }
+
+  return {
+    provider: 'pulumi',
+    projectName,
+    timestamp: new Date(),
+    resourceChanges,
+    outputs,
+    diagnostics,
+    changeSummary,
+    metadata: { rawOutput: pulumiOutput },
+  }
+}
