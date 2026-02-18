@@ -5,7 +5,7 @@ import { readdir, copyFile, rm, access, constants, writeFile } from 'fs/promises
 import type { IProvider, ProviderConfig } from './provider.js'
 import type { ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provider-plan.js'
-import { logger, UserError } from '../utils/index.js'
+import { logger, UserError, ProviderError } from '../utils/index.js'
 import { StateManager } from '../core/index.js'
 import { spawn } from 'node:child_process'
 
@@ -78,98 +78,8 @@ class TerraformProvider implements IProvider {
     }
   }
 
-  /**
-   * Maps Terraform JSON output to the common ProviderPlan structure
-   * This encapsulates all Terraform-specific parsing logic
-   */
   private mapTerraformOutputToProviderPlan(terraformOutput: string, projectName: string): ProviderPlan {
-    const resourceChanges: Array<ResourceChange> = []
-    const outputs: Array<Output> = []
-    const diagnostics: Array<Diagnostic> = []
-    let changeSummary = {
-      add: 0,
-      change: 0,
-      remove: 0,
-      replace: 0,
-      outputUpdates: 0,
-    }
-
-    // Parse the JSON lines from Terraform output
-    const jsonLines = terraformOutput.trim().split('\n')
-    const jsonObjects = jsonLines.map((line) => JSON.parse(line))
-
-    for (const obj of jsonObjects) {
-      if (obj.type === 'planned_change') {
-        const change = obj.change
-        const resource = change.resource
-
-        resourceChanges.push({
-          address: resource.addr,
-          type: resource.resource_type,
-          name: resource.resource_name,
-          actions: [change.action],
-          status: 'pending',
-          before: change.before,
-          after: change.after,
-          metadata: {},
-        })
-      }
-
-      if (obj.type === 'outputs') {
-        for (const [name, output] of Object.entries(obj.outputs)) {
-          const terraformOutput = output as { value?: string; sensitive?: boolean; action?: string }
-          const o: Output = {
-            name,
-            value: terraformOutput.value || 'TO_BE_DEFINED',
-            sensitive: terraformOutput.sensitive || false,
-            description: null,
-            action:
-              terraformOutput.action === 'create'
-                ? 'added'
-                : terraformOutput.action === 'update'
-                  ? 'updated'
-                  : terraformOutput.action === 'delete'
-                    ? 'deleted'
-                    : undefined,
-          }
-          outputs.push(o)
-          if (o.action) {
-            changeSummary.outputUpdates++
-          }
-        }
-      }
-
-      if (obj.type === 'change_summary') {
-        changeSummary = {
-          add: obj.changes.add || 0,
-          change: obj.changes.change || 0,
-          remove: obj.changes.remove || 0,
-          replace: obj.changes.replace || 0,
-          outputUpdates: changeSummary.outputUpdates || 0,
-        }
-      }
-
-      if (obj.type === 'diagnostic') {
-        diagnostics.push({
-          severity: obj.diagnostic.severity,
-          summary: obj.diagnostic.summary,
-          detail: obj.diagnostic.detail,
-          address: obj.diagnostic.address,
-          source: null,
-        })
-      }
-    }
-
-    return {
-      provider: 'terraform',
-      projectName,
-      timestamp: new Date(),
-      resourceChanges,
-      outputs,
-      diagnostics,
-      changeSummary,
-      metadata: { rawOutput: terraformOutput },
-    }
+    return parseTerraformPlanOutput(terraformOutput, projectName)
   }
 
   private async checkTerraformInstallation(): Promise<void> {
@@ -180,7 +90,9 @@ class TerraformProvider implements IProvider {
       if (stderr && stderr.trim()) logger.debug(`[terraform] stderr:\n${stderr}`)
       if (stdout && stdout.trim()) logger.debug(`[terraform] stdout (raw):\n${stdout}`)
     } catch {
-      throw new Error('Terraform is not installed or not available in PATH')
+      throw new UserError(
+        'Terraform is not installed or not available in PATH. Install it from https://developer.hashicorp.com/terraform/install',
+      )
     }
   }
 
@@ -215,7 +127,11 @@ class TerraformProvider implements IProvider {
       const backendConfigArgs = this.backendConfigToArgs(selectedEnv?.backend_config)
       await this.execCommand(`terraform init ${backendConfigArgs} --reconfigure`, configuration)
     } catch (error) {
-      throw new Error(`Failed to initialize Terraform in ${configuration.alias}`, { cause: error })
+      throw new ProviderError(
+        `Failed to initialize Terraform in ${configuration.alias}`,
+        'terraform',
+        configuration.alias,
+      )
     }
   }
 
@@ -293,7 +209,7 @@ class TerraformProvider implements IProvider {
           `Error stderr: ${err.stderr}`,
           `Error stdout: ${err.stdout}`,
         ]
-        throw new Error(messageParts.join('\n\t'))
+        throw new ProviderError(messageParts.join('\n\t'), 'terraform', configuration.alias)
       }
       throw error
     }
@@ -301,3 +217,92 @@ class TerraformProvider implements IProvider {
 }
 
 export const terraformProvider = new TerraformProvider() as IProvider
+
+export function parseTerraformPlanOutput(terraformOutput: string, projectName: string): ProviderPlan {
+  const resourceChanges: Array<ResourceChange> = []
+  const outputs: Array<Output> = []
+  const diagnostics: Array<Diagnostic> = []
+  let changeSummary = {
+    add: 0,
+    change: 0,
+    remove: 0,
+    replace: 0,
+    outputUpdates: 0,
+  }
+
+  const jsonLines = terraformOutput.trim().split('\n')
+  const jsonObjects = jsonLines.map((line) => JSON.parse(line))
+
+  for (const obj of jsonObjects) {
+    if (obj.type === 'planned_change') {
+      const change = obj.change
+      const resource = change.resource
+
+      resourceChanges.push({
+        address: resource.addr,
+        type: resource.resource_type,
+        name: resource.resource_name,
+        actions: [change.action],
+        status: 'pending',
+        before: change.before,
+        after: change.after,
+        metadata: {},
+      })
+    }
+
+    if (obj.type === 'outputs') {
+      for (const [name, output] of Object.entries(obj.outputs)) {
+        const tfOutput = output as { value?: string; sensitive?: boolean; action?: string }
+        const o: Output = {
+          name,
+          value: tfOutput.value || 'TO_BE_DEFINED',
+          sensitive: tfOutput.sensitive || false,
+          description: null,
+          action:
+            tfOutput.action === 'create'
+              ? 'added'
+              : tfOutput.action === 'update'
+                ? 'updated'
+                : tfOutput.action === 'delete'
+                  ? 'deleted'
+                  : undefined,
+        }
+        outputs.push(o)
+        if (o.action) {
+          changeSummary.outputUpdates++
+        }
+      }
+    }
+
+    if (obj.type === 'change_summary') {
+      changeSummary = {
+        add: obj.changes.add || 0,
+        change: obj.changes.change || 0,
+        remove: obj.changes.remove || 0,
+        replace: obj.changes.replace || 0,
+        outputUpdates: changeSummary.outputUpdates || 0,
+      }
+    }
+
+    if (obj.type === 'diagnostic') {
+      diagnostics.push({
+        severity: obj.diagnostic.severity,
+        summary: obj.diagnostic.summary,
+        detail: obj.diagnostic.detail,
+        address: obj.diagnostic.address,
+        source: null,
+      })
+    }
+  }
+
+  return {
+    provider: 'terraform',
+    projectName,
+    timestamp: new Date(),
+    resourceChanges,
+    outputs,
+    diagnostics,
+    changeSummary,
+    metadata: { rawOutput: terraformOutput },
+  }
+}
