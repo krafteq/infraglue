@@ -1,0 +1,6 @@
+workspace:
+  - './*'
+
+output:
+  network_name: './network:network_name'
+  db_host: './database:db_host'

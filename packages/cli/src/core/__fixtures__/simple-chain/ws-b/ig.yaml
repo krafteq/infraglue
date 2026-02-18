@@ -1,0 +1,8 @@
+injection:
+  out1: '../ws-a:out1'
+
+envs:
+  dev:
+    backend_type: local
+    backend_config:
+      path: ./terraform_dev.tfstate

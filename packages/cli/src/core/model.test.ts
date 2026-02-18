@@ -1,56 +1,5 @@
-import { AppliedWorkspace, ExecutionContext, ExecutionPlanBuilder, Monorepo, Workspace } from './model'
-import type { IProvider, ProviderConfig, ProviderInput, ProviderOutput, ProviderPlan } from '../providers'
-
-// Mock Provider
-class MockProvider implements IProvider {
-  getProviderName(): string {
-    return 'mock'
-  }
-  getPlan(config: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan> {
-    throw new Error('Method not implemented.')
-  }
-  apply(config: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderOutput> {
-    throw new Error('Method not implemented.')
-  }
-  getOutputs(config: ProviderConfig, env: string): Promise<ProviderOutput> {
-    throw new Error('Method not implemented.')
-  }
-  destroyPlan(config: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan> {
-    throw new Error('Method not implemented.')
-  }
-  destroy(config: ProviderConfig, input: ProviderInput, env: string): Promise<void> {
-    throw new Error('Method not implemented.')
-  }
-  isDestroyed(config: ProviderConfig, env: string): Promise<boolean> {
-    throw new Error('Method not implemented.')
-  }
-  selectEnvironment(config: ProviderConfig, env: string): Promise<void> {
-    return Promise.resolve()
-  }
-  existsInFolder(folderPath: string): Promise<boolean> {
-    throw new Error('Method not implemented.')
-  }
-  execAnyCommand(
-    command: string[],
-    config: ProviderConfig,
-    input: () => Promise<ProviderInput>,
-    env: string,
-  ): Promise<void> {
-    throw new Error('Method not implemented.')
-  }
-}
-
-const mockProvider = new MockProvider()
-
-function createWorkspace(
-  name: string,
-  dependsOn: string[] = [],
-  injections: Record<string, { workspace: string; key: string }> = {},
-  envs: string[] = ['dev'],
-): Workspace {
-  const envConfig = envs.reduce((acc, env) => ({ ...acc, [env]: {} }), {})
-  return new Workspace(name, `/path/to/${name}`, '/path/to/monorepo', mockProvider, injections, dependsOn, envConfig)
-}
+import { AppliedWorkspace, ExecutionContext, ExecutionPlanBuilder, Monorepo } from './model.js'
+import { createWorkspace } from '../__test-utils__/mock-provider.js'
 
 describe('Workspace', () => {
   it('should calculate allDependsOn correctly', () => {
@@ -91,7 +40,7 @@ describe('Monorepo', () => {
 
   it('should get workspace or throw', () => {
     expect(monorepo.getWorkspace('ws1')).toBe(ws1)
-    expect(() => monorepo.getWorkspace('non-existent')).toThrow('Workspace not found: non-existent')
+    expect(() => monorepo.getWorkspace('non-existent')).toThrow("Workspace 'non-existent' not found")
   })
 
   it('should get dependencies', () => {
