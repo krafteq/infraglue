@@ -42,3 +42,6 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+      - name: Build
+        run: cd packages/cli && pnpm build
