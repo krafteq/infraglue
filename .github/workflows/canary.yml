@@ -36,6 +36,19 @@ jobs:
       - name: Build
         run: cd packages/cli && pnpm build
 
+      - name: Ensure changeset exists
+        run: |
+          # Create a patch changeset if none exist, so --snapshot has something to version
+          if ! ls .changeset/*.md 2>/dev/null | grep -qv README.md; then
+            cat > .changeset/canary.md << 'CHANGESET'
+          ---
+          '@krafteq/infraglue': patch
+          ---
+
+          Canary release
+          CHANGESET
+          fi
+
       - name: Version canary
         run: pnpm changeset version --snapshot canary
         env:
