@@ -12,15 +12,15 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "test": "jest",
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
     "start": "node dist/index.js",
     "show": "tsx ./src/index.ts show ../../examples/terraform_and_pulumi/ --json",
     "apply": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./src/index.ts apply ../../examples/terraform_and_pulumi/",
     "destroy": "cross-env PULUMI_CONFIG_PASSPHRASE='' tsx ./src/index.ts destroy ../../examples/terraform_and_pulumi/",
     "ts:check": "tsc --noEmit",
-    "prepare": "npm run build"
+    "prepublishOnly": "pnpm build && pnpm test && pnpm ts:check"
   },
   "keywords": [
     "cli",
@@ -31,19 +31,24 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "ci-info": "^4.1.0",
     "commander": "^14.0.0",
+    "picocolors": "^1.1.1",
     "yaml": "^2.8.1",
-    "glob": "^11.1.0"
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.8.3",
     "cross-env": "^7.0.3",
-    "jest": "^30.0.4",
+    "tsup": "^8.5.1",
     "tsx": "^4.20.3",
-    "ts-jest": "^29.4.0",
-    "@types/jest": "^30.0.0"
+    "typescript": "^5.8.3"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
   },
   "publishConfig": {
     "main": "dist/index.js"
