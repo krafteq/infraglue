@@ -1,5 +1,6 @@
 import { DefaultFormatter } from './default-formatter.js'
 import type { IFormatter } from './formatter.js'
+import { UserError } from '../utils/index.js'
 
 export function getFormatter(name?: string): IFormatter {
   if (!name) {
@@ -9,6 +10,6 @@ export function getFormatter(name?: string): IFormatter {
     case 'default':
       return DefaultFormatter
     default:
-      throw new Error(`Formatter ${name} not found`)
+      throw new UserError(`Unknown formatter '${name}'. Available: default.`)
   }
 }

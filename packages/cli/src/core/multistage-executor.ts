@@ -22,12 +22,14 @@ export class MultistageExecutor {
     const state = await this.stateManager.read()
     if (!state.isEnvSelected) {
       throw new UserError(
-        `Cannot execute: environments across workspaces are in inconsistent state. Perform environment selection and try again`,
+        "Cannot execute: environments across workspaces are in inconsistent state. Run 'ig env select <env>' and try again.",
       )
     }
 
     if (state.env !== this.ctx.env) {
-      throw new UserError("Initialized environment doesn't match execution environment")
+      throw new UserError(
+        `Initialized environment '${state.env}' doesn't match execution environment '${this.ctx.env}'. Run 'ig env select ${this.ctx.env}' first.`,
+      )
     }
 
     const executionPlan = new ExecutionPlanBuilder(this.ctx).build()
