@@ -1,6 +1,6 @@
 {
   "name": "@krafteq/infraglue",
-  "version": "LOCAL",
+  "version": "0.1.1",
   "description": "Tool to manage monorepo IaaC",
   "type": "module",
   "main": "src/index.ts",
