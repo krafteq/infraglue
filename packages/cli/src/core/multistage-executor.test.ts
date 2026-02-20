@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { MultistageExecutor, type IExecOptions } from './multistage-executor.js'
+import { MultistageExecutor, type IExecOptions, type IPlanExecOptions } from './multistage-executor.js'
 import { ExecutionContext, Monorepo, Workspace, AppliedWorkspace } from './model.js'
 import { MockProvider, createProviderPlan } from '../__test-utils__/mock-provider.js'
 import { State } from './state-manager.js'
@@ -343,6 +343,121 @@ describe('MultistageExecutor', () => {
       await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
 
       expect(ctx.findAppliedOutput('ws1', 'url')).toBe('http://localhost:3000')
+    })
+  })
+
+  describe('plan', () => {
+    it('should return hasChanges: false when all workspaces are up to date', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(createProviderPlan())
+      mockGetOutputs.mockResolvedValue({ outputs: { existing: 'value' }, actual: true })
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(false)
+      expect(mockApply).not.toHaveBeenCalled()
+    })
+
+    it('should return hasChanges: true when changes are detected', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(true)
+      expect(mockApply).not.toHaveBeenCalled()
+    })
+
+    it('should gather plans across multiple levels with output injection', async () => {
+      envSelected()
+      const wsNetwork = createWs('ws1')
+      const wsDb = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [wsNetwork, wsDb], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      let planCallCount = 0
+      mockGetPlan.mockImplementation(async () => {
+        planCallCount++
+        if (planCallCount === 1) {
+          // ws1 has no changes — trigger output caching
+          return createProviderPlan()
+        }
+        // ws2 has changes
+        return createProviderPlan({
+          changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+        })
+      })
+      mockGetOutputs.mockResolvedValue({ outputs: { network_name: 'dev_net' }, actual: true })
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(true)
+      expect(mockGetPlan).toHaveBeenCalledTimes(2)
+      expect(mockApply).not.toHaveBeenCalled()
+      // Outputs from ws1 should be cached for downstream use
+      expect(ctx.findAppliedOutput('ws1', 'network_name')).toBe('dev_net')
+    })
+
+    it('should not call askForConfirmation', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      await executor.plan({ formatter: createFormatter() })
+
+      // plan() does not use integration at all — no confirmation
+      expect(mockApply).not.toHaveBeenCalled()
+    })
+
+    it('should work with --project filter (single workspace)', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      // currentWorkspace = ws2, ignoreDependencies = true
+      const ctx = new ExecutionContext(monorepo, ws2, true, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(true)
+      // Only ws2 should be planned (filtered by currentWorkspace + ignoreDeps)
+      expect(mockGetPlan).toHaveBeenCalledTimes(1)
+    })
+
+    it('should validate env the same as exec', async () => {
+      mockRead.mockResolvedValue(new State())
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      await expect(executor.plan({ formatter: createFormatter() })).rejects.toThrow(
+        'Cannot execute: environments across workspaces are in inconsistent state',
+      )
     })
   })
 

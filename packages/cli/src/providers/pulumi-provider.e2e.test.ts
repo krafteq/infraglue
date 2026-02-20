@@ -107,16 +107,23 @@ describe('parsePulumiPreviewOutput', () => {
     expect(plan.metadata.rawOutput).toBe(PULUMI_PREVIEW_NO_CHANGES)
   })
 
-  it('should set before to null for all resources', () => {
+  it('should set before to null for create resources', () => {
     const plan = parsePulumiPreviewOutput(PULUMI_PREVIEW_CREATE, 'proj')
     for (const change of plan.resourceChanges) {
       expect(change.before).toBeNull()
     }
   })
 
-  it('should handle resources with no properties', () => {
+  it('should read oldState for update resources', () => {
+    const plan = parsePulumiPreviewOutput(PULUMI_PREVIEW_UPDATE, 'proj')
+    expect(plan.resourceChanges[0].before).toEqual({ name: 'app', image: 'node:18' })
+    expect(plan.resourceChanges[0].after).toEqual({ name: 'app', image: 'node:20' })
+  })
+
+  it('should handle delete with oldState but no newState', () => {
     const plan = parsePulumiPreviewOutput(PULUMI_PREVIEW_MIXED, 'proj')
     const deleteChange = plan.resourceChanges.find((r) => r.actions[0] === 'delete')
+    expect(deleteChange!.before).toEqual({ bucketName: 'my-old-bucket' })
     expect(deleteChange!.after).toBeNull()
   })
 })

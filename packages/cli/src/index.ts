@@ -89,6 +89,39 @@ const execCommands = [
   { name: 'destroy', desc: 'Destroy the platform configuration', isDestroy: true },
 ]
 
+program
+  .command('plan')
+  .description('Preview infrastructure changes without applying')
+  .option('-f, --format <format>', 'Select formatter for the plan', 'default')
+  .option('-p, --project <project>', 'Project to plan')
+  .option('-e, --env <env>', 'Environment to plan')
+  .option('--no-deps', 'Ignore dependencies')
+  .option('--detailed', 'Show attribute-level diffs for changed resources')
+  .action(
+    async ({
+      format,
+      env,
+      project,
+      deps,
+      detailed,
+    }: {
+      format?: string
+      env: string
+      project?: string
+      deps: boolean
+      detailed?: boolean
+    }) => {
+      const monorepo = requireMonorepo()
+      env = await resolveEnv(env)
+      const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, false, env)
+      const result = await new MultistageExecutor(execContext).plan({
+        formatter: getFormatter(format),
+        detailed: detailed ?? false,
+      })
+      process.exitCode = result.hasChanges ? 2 : 0
+    },
+  )
+
 for (const execCmd of execCommands) {
   program
     .command(execCmd.name)

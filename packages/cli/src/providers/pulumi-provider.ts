@@ -273,8 +273,8 @@ export function parsePulumiPreviewOutput(pulumiOutput: string, projectName: stri
         name: resourceName,
         actions,
         status: 'pending',
-        before: null,
-        after: step.resource?.properties || null,
+        before: step.oldState?.inputs ?? null,
+        after: step.newState?.inputs ?? step.resource?.properties ?? null,
         metadata: {},
       })
     }

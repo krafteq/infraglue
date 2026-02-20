@@ -26,24 +26,39 @@ export const TERRAFORM_PLAN_WITH_DIAGNOSTICS = [
   '{"@level":"info","@message":"No changes. Infrastructure is up-to-date.","type":"change_summary","changes":{"add":0,"change":0,"import":0,"remove":0,"operation":"plan"}}',
 ].join('\n')
 
+// Terraform plan where "update" has identical before/after (metadata-only drift)
+export const TERRAFORM_PLAN_METADATA_ONLY = [
+  '{"@level":"info","type":"planned_change","change":{"resource":{"addr":"docker_container.app","module":"","resource":"docker_container.app","resource_type":"docker_container","resource_name":"app","resource_key":null},"action":"update","before":{"image":"node:18","name":"app","ports":[{"internal":3000,"external":3000}]},"after":{"image":"node:18","name":"app","ports":[{"internal":3000,"external":3000}]}}}',
+  '{"@level":"info","@message":"Plan: 0 to add, 1 to change, 0 to destroy.","type":"change_summary","changes":{"add":0,"change":1,"import":0,"remove":0,"operation":"plan"}}',
+].join('\n')
+
+// Terraform plan with a real change + a metadata-only change + a create
+export const TERRAFORM_PLAN_MIXED_CHANGES = [
+  '{"@level":"info","type":"planned_change","change":{"resource":{"addr":"docker_container.app","module":"","resource":"docker_container.app","resource_type":"docker_container","resource_name":"app","resource_key":null},"action":"update","before":{"image":"node:18","name":"app"},"after":{"image":"node:20","name":"app"}}}',
+  '{"@level":"info","type":"planned_change","change":{"resource":{"addr":"docker_network.main","module":"","resource":"docker_network.main","resource_type":"docker_network","resource_name":"main","resource_key":null},"action":"update","before":{"name":"dev-network","driver":"bridge"},"after":{"name":"dev-network","driver":"bridge"}}}',
+  '{"@level":"info","type":"planned_change","change":{"resource":{"addr":"docker_volume.data","module":"","resource":"docker_volume.data","resource_type":"docker_volume","resource_name":"data","resource_key":null},"action":"create","before":null,"after":{"name":"app-data"}}}',
+  '{"@level":"info","@message":"Plan: 1 to add, 2 to change, 0 to destroy.","type":"change_summary","changes":{"add":1,"change":2,"import":0,"remove":0,"operation":"plan"}}',
+].join('\n')
+
 export const TERRAFORM_OUTPUT_JSON = JSON.stringify({
   network_name: { value: 'dev-network', type: 'string', sensitive: false },
   db_host: { value: 'localhost:5432', type: 'string', sensitive: false },
 })
 
 // Pulumi preview JSON fixtures (single JSON object)
+// Uses the real `pulumi preview --json` format: steps have oldState/newState (ResourceV3 with inputs/outputs)
 
 export const PULUMI_PREVIEW_CREATE = JSON.stringify({
   steps: [
     {
       op: 'create',
       urn: 'urn:pulumi:dev::network::docker:index/network:Network::dev-network',
-      resource: { properties: { name: 'dev-network', driver: 'bridge' } },
+      newState: { inputs: { name: 'dev-network', driver: 'bridge' } },
     },
     {
       op: 'create',
       urn: 'urn:pulumi:dev::network::docker:index/container:Container::app-container',
-      resource: { properties: { name: 'app', image: 'node:18' } },
+      newState: { inputs: { name: 'app', image: 'node:18' } },
     },
   ],
 })
@@ -53,7 +68,21 @@ export const PULUMI_PREVIEW_UPDATE = JSON.stringify({
     {
       op: 'update',
       urn: 'urn:pulumi:dev::network::docker:index/container:Container::app-container',
-      resource: { properties: { name: 'app', image: 'node:20' } },
+      oldState: { inputs: { name: 'app', image: 'node:18' } },
+      newState: { inputs: { name: 'app', image: 'node:20' } },
+      detailedDiff: { image: { kind: 'UPDATE' } },
+    },
+  ],
+})
+
+// Pulumi update where oldState and newState inputs are identical (metadata-only drift)
+export const PULUMI_PREVIEW_METADATA_ONLY = JSON.stringify({
+  steps: [
+    {
+      op: 'update',
+      urn: 'urn:pulumi:dev::network::docker:index/container:Container::app-container',
+      oldState: { inputs: { name: 'app', image: 'node:18', ports: [{ internal: 3000, external: 3000 }] } },
+      newState: { inputs: { name: 'app', image: 'node:18', ports: [{ internal: 3000, external: 3000 }] } },
     },
   ],
 })
@@ -63,27 +92,31 @@ export const PULUMI_PREVIEW_MIXED = JSON.stringify({
     {
       op: 'create',
       urn: 'urn:pulumi:dev::myproject::aws:s3/bucket:Bucket::new-bucket',
-      resource: { properties: { bucketName: 'my-new-bucket' } },
+      newState: { inputs: { bucketName: 'my-new-bucket' } },
     },
     {
       op: 'update',
       urn: 'urn:pulumi:dev::myproject::aws:ec2/instance:Instance::web-server',
-      resource: { properties: { instanceType: 't3.medium' } },
+      oldState: { inputs: { instanceType: 't2.micro' } },
+      newState: { inputs: { instanceType: 't3.medium' } },
+      detailedDiff: { instanceType: { kind: 'UPDATE' } },
     },
     {
       op: 'delete',
       urn: 'urn:pulumi:dev::myproject::aws:s3/bucket:Bucket::old-bucket',
-      resource: {},
+      oldState: { inputs: { bucketName: 'my-old-bucket' } },
     },
     {
       op: 'replace',
       urn: 'urn:pulumi:dev::myproject::aws:rds/instance:Instance::database',
-      resource: { properties: { engineVersion: '15.0' } },
+      oldState: { inputs: { engineVersion: '14.0' } },
+      newState: { inputs: { engineVersion: '15.0' } },
     },
     {
       op: 'same',
       urn: 'urn:pulumi:dev::myproject::pulumi:pulumi:Stack::myproject-dev',
-      resource: {},
+      oldState: { inputs: {} },
+      newState: { inputs: {} },
     },
   ],
 })
@@ -93,7 +126,8 @@ export const PULUMI_PREVIEW_NO_CHANGES = JSON.stringify({
     {
       op: 'same',
       urn: 'urn:pulumi:dev::myproject::pulumi:pulumi:Stack::myproject-dev',
-      resource: {},
+      oldState: { inputs: {} },
+      newState: { inputs: {} },
     },
   ],
 })
@@ -103,7 +137,7 @@ export const PULUMI_PREVIEW_WITH_OUTPUTS = JSON.stringify({
     {
       op: 'create',
       urn: 'urn:pulumi:dev::network::docker:index/network:Network::dev-network',
-      resource: { properties: { name: 'dev-network' } },
+      newState: { inputs: { name: 'dev-network' } },
     },
   ],
   outputs: {

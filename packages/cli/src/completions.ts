@@ -5,7 +5,7 @@ _ig_completions() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  commands="apply destroy config env provider completion"
+  commands="apply destroy plan config env provider completion"
 
   case "\${prev}" in
     ig)
@@ -43,6 +43,7 @@ _ig() {
   commands=(
     'apply:Apply infrastructure changes'
     'destroy:Destroy infrastructure'
+    'plan:Preview infrastructure changes without applying'
     'config:Manage configuration'
     'env:Manage environments'
     'provider:Run provider CLI commands'
@@ -63,7 +64,7 @@ _ig() {
       ;;
     args)
       case $words[1] in
-        apply|destroy)
+        apply|destroy|plan)
           _arguments \\
             '(-e --env)'{-e,--env}'[Environment name]:env:' \\
             '(-f --format)'{-f,--format}'[Output format]:format:(default)' \\
@@ -106,6 +107,7 @@ export function generateFishCompletion(): string {
 # ig fish completions
 complete -c ig -n '__fish_use_subcommand' -a apply -d 'Apply infrastructure changes'
 complete -c ig -n '__fish_use_subcommand' -a destroy -d 'Destroy infrastructure'
+complete -c ig -n '__fish_use_subcommand' -a plan -d 'Preview infrastructure changes without applying'
 complete -c ig -n '__fish_use_subcommand' -a config -d 'Manage configuration'
 complete -c ig -n '__fish_use_subcommand' -a env -d 'Manage environments'
 complete -c ig -n '__fish_use_subcommand' -a provider -d 'Run provider CLI commands'
@@ -118,6 +120,13 @@ complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s i -l integratio
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s a -l approve -d 'Auto-approve level' -r
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s p -l project -d 'Project name' -r
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -l no-deps -d 'Ignore dependencies'
+
+# plan options
+complete -c ig -n '__fish_seen_subcommand_from plan' -s e -l env -d 'Environment name' -r
+complete -c ig -n '__fish_seen_subcommand_from plan' -s f -l format -d 'Output format' -r
+complete -c ig -n '__fish_seen_subcommand_from plan' -s p -l project -d 'Project name' -r
+complete -c ig -n '__fish_seen_subcommand_from plan' -l no-deps -d 'Ignore dependencies'
+complete -c ig -n '__fish_seen_subcommand_from plan' -l detailed -d 'Show attribute-level diffs'
 
 # env subcommands
 complete -c ig -n '__fish_seen_subcommand_from env; and not __fish_seen_subcommand_from select current' -a select -d 'Select an environment'

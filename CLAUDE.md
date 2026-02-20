@@ -105,6 +105,17 @@ Every new feature or bug fix MUST include tests. Run `pnpm test:all` before cons
 | State persistence                     | Real temp directories (mkdtemp + cleanup)           | `state-manager.e2e.test.ts`                       |
 | Orchestration (executor, env-manager) | `vi.mock` dependencies, assert interaction sequence | `multistage-executor.test.ts`                     |
 | Adapters (workspace-interop)          | MockProvider with vi.fn spies, mock StateManager    | `workspace-interop.test.ts`                       |
+| Provider-dependent logic              | Parse real provider output → feed into function     | `plan-diff.e2e.test.ts`                           |
+
+### E2E Tests for Provider-Dependent Logic
+
+Any new functionality that processes or depends on real Terraform/Pulumi output shapes (e.g., `ResourceChange`, `ProviderPlan`) **MUST** include e2e tests that:
+
+1. Parse raw provider CLI output from `provider-fixtures.ts` through the real provider parser (`parseTerraformPlanOutput` / `parsePulumiPreviewOutput`)
+2. Feed the resulting typed structures into the new function
+3. Assert correct behavior against both Terraform and Pulumi output shapes (they differ — e.g., Pulumi uses `oldState.inputs`/`newState.inputs`, Terraform uses inline `before`/`after`)
+
+This catches integration issues that unit tests with hand-crafted `ResourceChange` objects would miss (e.g., unexpected field shapes, nested structures, null patterns). Add new fixtures to `provider-fixtures.ts` when existing ones don't cover the scenario.
 
 ### Patterns
 

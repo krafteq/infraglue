@@ -10,6 +10,13 @@ import {
 } from '../providers/index.js'
 import type { IIntegration } from '../integrations/integration.js'
 import type { IFormatter } from '../formatters/formatter.js'
+import { computeDetailedDiff } from './plan-diff.js'
+
+interface LevelPlanEntry {
+  workspace: Workspace
+  inputs: ProviderInput
+  plan: ProviderPlan
+}
 
 export class MultistageExecutor {
   private readonly stateManager: StateManager
@@ -18,7 +25,7 @@ export class MultistageExecutor {
     this.stateManager = new StateManager(this.ctx.monorepo.path)
   }
 
-  public async exec(opts: IExecOptions) {
+  private async validateEnv() {
     const state = await this.stateManager.read()
     if (!state.isEnvSelected) {
       throw new UserError(
@@ -31,6 +38,119 @@ export class MultistageExecutor {
         `Initialized environment '${state.env}' doesn't match execution environment '${this.ctx.env}'. Run 'ig env select ${this.ctx.env}' first.`,
       )
     }
+  }
+
+  private async gatherLevelPlans(workspaces: Workspace[]): Promise<LevelPlanEntry[]> {
+    const levelPlans: LevelPlanEntry[] = []
+
+    for (const workspace of workspaces) {
+      const inputs: ProviderInput = await this.ctx.getInputs(workspace)
+      const interop = this.ctx.interop(workspace)
+
+      let plan: ProviderPlan
+      if (this.ctx.isDestroy) {
+        const isDestroyed = await interop.isDestroyed()
+        if (isDestroyed) {
+          logger.info(`✅ ${workspace.name} is already destroyed.`)
+          continue
+        }
+
+        plan = await interop.destroyPlan(inputs)
+        if (!hasChanges(plan)) {
+          logger.info(`✅ Nothing to destroy in ${workspace.name}`)
+          continue
+        }
+      } else {
+        plan = await interop.getPlan(inputs)
+        if (!hasChanges(plan)) {
+          const { outputs } = await interop.getOutputs({ stale: this.ctx.ignoreDependencies })
+          logger.info(`✅ ${workspace.name} is up to date.`)
+
+          // TODO: outputs can contain secrets, decide if we want to output them
+          logger.debug(`Outputs: ${JSON.stringify(outputs, null, 2)}`)
+          this.ctx.storeWorkspaceOutputs(workspace, outputs)
+          continue
+        }
+      }
+
+      levelPlans.push({ workspace, inputs, plan })
+    }
+
+    return levelPlans
+  }
+
+  private logPlanSummary(levelIndex: number, levelPlans: LevelPlanEntry[], formatter: IFormatter) {
+    // TODO: it should probably be part of the formatter as well.
+    logger.info('--------------------------------')
+    logger.info(`📋 Level ${levelIndex + 1} Plan Summary:`)
+    logger.info('--------------------------------')
+
+    let totalChanges = zero()
+    for (const { workspace, plan } of levelPlans) {
+      logger.info(`\n🏭 Workspace: ${workspace.name}`)
+      logger.info(`   ${dump(plan.changeSummary)}`)
+      totalChanges = add(totalChanges, plan.changeSummary)
+    }
+
+    logger.info(`\n📊 Total Changes: ${dump(totalChanges)}`)
+
+    for (const { workspace, inputs, plan } of levelPlans) {
+      const formatted = formatter.format(plan)
+      logger.info(`\n🏭 Workspace: ${workspace.name}`)
+      logger.info(`Inputs:\n${JSON.stringify(inputs, null, 2)}`)
+      logger.info(`Plan:\n${formatted}`)
+    }
+  }
+
+  public async plan(opts: IPlanExecOptions): Promise<PlanResult> {
+    await this.validateEnv()
+
+    const executionPlan = new ExecutionPlanBuilder(this.ctx).build()
+    logger.info(`\n Selected Environment: ${this.ctx.env}`)
+
+    let hasAnyChanges = false
+
+    for (let levelIndex = 0; levelIndex < executionPlan.levelsCount; levelIndex++) {
+      const level = executionPlan.levels[levelIndex]
+
+      logger.info(`\n🔧 Processing Level ${levelIndex + 1}/${executionPlan.levelsCount}`)
+      logger.info('=====================================')
+
+      const levelPlans = await this.gatherLevelPlans(level.workspaces)
+
+      if (levelPlans.length === 0) {
+        logger.info('✅ No changes needed in this level')
+        continue
+      }
+
+      hasAnyChanges = true
+      this.logPlanSummary(levelIndex, levelPlans, opts.formatter)
+
+      if (opts.detailed) {
+        for (const { workspace, plan } of levelPlans) {
+          const diff = computeDetailedDiff(plan.resourceChanges)
+          if (diff.metadataOnlyCount > 0) {
+            logger.info(`\n🔍 ${workspace.name}: ${diff.metadataOnlyCount} metadata-only, ${diff.realChangeCount} real`)
+          }
+          for (const resource of diff.resources) {
+            if (resource.isMetadataOnly) {
+              logger.info(`   ⚪ ${resource.address} (metadata-only, no attribute changes)`)
+            } else if (resource.attributeDiffs.length > 0) {
+              logger.info(`   🔶 ${resource.address}`)
+              for (const attr of resource.attributeDiffs) {
+                logger.info(`      ${attr.key}: ${JSON.stringify(attr.before)} → ${JSON.stringify(attr.after)}`)
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return { hasChanges: hasAnyChanges }
+  }
+
+  public async exec(opts: IExecOptions) {
+    await this.validateEnv()
 
     const executionPlan = new ExecutionPlanBuilder(this.ctx).build()
     logger.info(`\n Selected Environment: ${this.ctx.env}`)
@@ -41,63 +161,14 @@ export class MultistageExecutor {
       logger.info(`\n🔧 Processing Level ${levelIndex + 1}/${executionPlan.levelsCount}`)
       logger.info('=====================================')
 
-      const levelPlans: Array<{
-        workspace: Workspace
-        inputs: ProviderInput
-        plan: ProviderPlan
-      }> = []
-
-      for (const workspace of level.workspaces) {
-        const inputs: ProviderInput = await this.ctx.getInputs(workspace)
-        const interop = this.ctx.interop(workspace)
-
-        let plan: ProviderPlan
-        if (this.ctx.isDestroy) {
-          const isDestroyed = await interop.isDestroyed()
-          if (isDestroyed) {
-            logger.info(`✅ ${workspace.name} is already destroyed.`)
-            continue
-          }
-
-          plan = await interop.destroyPlan(inputs)
-          if (!hasChanges(plan)) {
-            logger.info(`✅ Nothing to destroy in ${workspace.name}`)
-            continue
-          }
-        } else {
-          plan = await interop.getPlan(inputs)
-          if (!hasChanges(plan)) {
-            const { outputs } = await interop.getOutputs({ stale: this.ctx.ignoreDependencies })
-            logger.info(`✅ ${workspace.name} is up to date.`)
-
-            // TODO: outputs can contain secrets, decide if we want to output them
-            logger.debug(`Outputs: ${JSON.stringify(outputs, null, 2)}`)
-            this.ctx.storeWorkspaceOutputs(workspace, outputs)
-            continue
-          }
-        }
-
-        levelPlans.push({ workspace, inputs, plan })
-      }
+      const levelPlans = await this.gatherLevelPlans(level.workspaces)
 
       if (levelPlans.length === 0) {
         logger.info('✅ No changes needed in this level')
         continue
       }
 
-      // TODO: it should probably be part of the formatter as well.
-      logger.info('--------------------------------')
-      logger.info(`📋 Level ${levelIndex + 1} Plan Summary:`)
-      logger.info('--------------------------------')
-
-      let totalChanges = zero()
-      for (const { workspace, plan } of levelPlans) {
-        logger.info(`\n🏭 Workspace: ${workspace.name}`)
-        logger.info(`   ${dump(plan.changeSummary)}`)
-        totalChanges = add(totalChanges, plan.changeSummary)
-      }
-
-      logger.info(`\n📊 Total Changes: ${dump(totalChanges)}`)
+      this.logPlanSummary(levelIndex, levelPlans, opts.formatter)
 
       let message = levelPlans
         .map(({ workspace, inputs, plan }) => {
@@ -200,4 +271,13 @@ export interface IExecOptions {
   integration: IIntegration
   approve?: number | undefined
   preview?: boolean
+}
+
+export interface IPlanExecOptions {
+  formatter: IFormatter
+  detailed?: boolean
+}
+
+export interface PlanResult {
+  hasChanges: boolean
 }

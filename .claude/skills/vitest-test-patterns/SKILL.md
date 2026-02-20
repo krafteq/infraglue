@@ -183,8 +183,38 @@ it('should execute level 1 then level 2', async () => {
 })
 ```
 
+## E2E Tests for Provider-Dependent Logic
+
+When new functionality processes or depends on real provider output (e.g., Terraform plan JSON, Pulumi preview JSON), **always add e2e tests** (`*.e2e.test.ts`) that:
+
+1. Parse raw CLI output from fixture strings through the real provider parser
+2. Feed the resulting typed structures (e.g., `ResourceChange[]`, `ProviderPlan`) into the new function
+3. Assert correct behavior against **both** provider formats (they differ structurally — e.g., Pulumi uses `step.oldState.inputs`/`step.newState.inputs`, Terraform uses inline `before`/`after`)
+
+This catches integration issues that unit tests with hand-crafted objects miss (unexpected field shapes, nested structures, null patterns).
+
+```ts
+// provider-fixtures.ts — add new fixtures for each scenario
+export const PROVIDER_OUTPUT_METADATA_ONLY = [
+  '{"type":"planned_change","change":{"action":"update","before":{"x":"same"},"after":{"x":"same"}}}',
+  '{"type":"change_summary","changes":{"add":0,"change":1,"remove":0}}',
+].join('\n')
+
+// my-feature.e2e.test.ts
+import { parseProviderOutput } from '../providers/provider.js'
+import { myNewFunction } from './my-feature.js'
+import { PROVIDER_OUTPUT_REAL_CHANGE, PROVIDER_OUTPUT_METADATA_ONLY } from '../__test-utils__/provider-fixtures.js'
+
+it('should work with real provider output', () => {
+  const plan = parseProviderOutput(PROVIDER_OUTPUT_REAL_CHANGE, 'proj')
+  const result = myNewFunction(plan.resourceChanges)
+  expect(result.count).toBe(1)
+})
+```
+
 ## Gotchas
 
 - **Zod schema coercion vs raw YAML:** If code validates with `schema.safeParse(raw)` but then uses `raw as Type` instead of `parsed.data`, the coercion transforms (e.g., `z.coerce.string()`) are NOT applied. Test against actual behavior, not schema definition.
 - **Module-level singletons (mutex, registry):** These persist across tests within a file. Concurrent tests that lock a mutex may deadlock. Prefer sequential operations in tests or mock the singleton.
 - **`vi.mock` hoisting:** `vi.mock()` calls are hoisted to the top of the file. Variables referenced inside the factory must be declared with `vi.fn()` at module scope — they can't reference `let` variables from `beforeEach`.
+- **Fixture accuracy:** Always verify test fixtures match the real CLI output format — don't trust existing fixtures blindly. Simplified/outdated fixtures can mask parser bugs (e.g., a fixture using `step.resource.properties` when the real CLI outputs `step.oldState.inputs`).
