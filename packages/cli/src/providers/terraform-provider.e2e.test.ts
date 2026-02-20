@@ -98,6 +98,17 @@ describe('parseTerraformPlanOutput', () => {
     expect(plan.timestamp).toBeInstanceOf(Date)
   })
 
+  it('should normalize missing before/after to null', () => {
+    const output = [
+      '{"@level":"info","type":"planned_change","change":{"resource":{"addr":"aws_instance.web","resource_type":"aws_instance","resource_name":"web","provider":"registry.terraform.io/hashicorp/aws"},"action":"create","after":{"ami":"ami-123"}}}',
+      '{"@level":"info","type":"change_summary","changes":{"add":1,"change":0,"remove":0}}',
+    ].join('\n')
+
+    const plan = parseTerraformPlanOutput(output, 'proj')
+    expect(plan.resourceChanges[0].before).toBeNull()
+    expect(plan.resourceChanges[0].after).toEqual({ ami: 'ami-123' })
+  })
+
   it('should store raw output in metadata', () => {
     const plan = parseTerraformPlanOutput(TERRAFORM_PLAN_NO_CHANGES, 'proj')
     expect(plan.metadata.rawOutput).toBe(TERRAFORM_PLAN_NO_CHANGES)

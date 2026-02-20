@@ -288,8 +288,8 @@ export function parseTerraformPlanOutput(terraformOutput: string, projectName: s
         name: resource.resource_name,
         actions: [change.action],
         status: 'pending',
-        before: change.before,
-        after: change.after,
+        before: change.before ?? null,
+        after: change.after ?? null,
         metadata: {},
       })
     }

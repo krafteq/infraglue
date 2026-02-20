@@ -62,7 +62,7 @@ export function computeDetailedDiff(resourceChanges: ResourceChange[]): Detailed
   let realChangeCount = 0
 
   for (const rc of resourceChanges) {
-    if (rc.actions.includes('update') && rc.before !== null && rc.after !== null) {
+    if (rc.actions.includes('update') && rc.before != null && rc.after != null) {
       const attributeDiffs = diffAttributes(rc.before, rc.after)
       const isMetadataOnly = attributeDiffs.length === 0
       resources.push({ address: rc.address, actions: rc.actions, attributeDiffs, isMetadataOnly })

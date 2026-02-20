@@ -191,6 +191,34 @@ describe('computeDetailedDiff', () => {
     expect(result.realChangeCount).toBe(0)
   })
 
+  it('should handle update with undefined before (missing from JSON)', () => {
+    const result = computeDetailedDiff([
+      makeResourceChange({
+        actions: ['update'],
+        before: undefined as unknown as Record<string, unknown> | null,
+        after: { ami: 'ami-new' },
+      }),
+    ])
+
+    expect(result.resources).toHaveLength(1)
+    expect(result.resources[0].isMetadataOnly).toBe(false)
+    expect(result.realChangeCount).toBe(1)
+  })
+
+  it('should handle update with undefined after (missing from JSON)', () => {
+    const result = computeDetailedDiff([
+      makeResourceChange({
+        actions: ['update'],
+        before: { ami: 'ami-old' },
+        after: undefined as unknown as Record<string, unknown> | null,
+      }),
+    ])
+
+    expect(result.resources).toHaveLength(1)
+    expect(result.resources[0].isMetadataOnly).toBe(false)
+    expect(result.realChangeCount).toBe(1)
+  })
+
   it('should handle replace actions as non-update (not metadata-only)', () => {
     const result = computeDetailedDiff([
       makeResourceChange({
