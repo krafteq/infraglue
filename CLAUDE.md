@@ -10,6 +10,10 @@ InfraGlue (`ig`) is a CLI tool for managing Infrastructure as Code monorepos. It
 
 Feature requests are stored in `.feature-requests/` directory (e.g., `.feature-requests/fr-001-plan-command.md`).
 
+## Packaged Skill
+
+`packages/cli/skill/SKILL.md` is the AI coding agent skill shipped with the npm package (installed via `ig install-skill`). **All new features, commands, and behavior changes MUST be reflected in this skill file.** It is the primary documentation that AI agents use to understand ig's capabilities, commands, and configuration format.
+
 ## Common Commands
 
 ```bash
@@ -38,6 +42,18 @@ pnpm destroy                             # destroy all workspaces in example
 ### Core Flow
 
 `index.ts` (Commander.js CLI) → `monorepo-reader.ts` (parse ig.yaml configs) → `model.ts` (build Monorepo/Workspace graph) → `multistage-executor.ts` (topological sort into levels, execute sequentially) → providers (Terraform/Pulumi commands)
+
+### IProvider Interface
+
+All provider operations go through `IProvider` → `WorkspaceInterop` (delegation + state caching) → `MultistageExecutor` (orchestration). When adding a new provider operation:
+
+1. Add method to `IProvider` in `provider.ts`
+2. Implement in both `TerraformProvider` and `PulumiProvider`
+3. Add delegation method in `WorkspaceInterop`
+4. Add orchestration method in `MultistageExecutor` (if multi-workspace)
+5. Register CLI command in `index.ts`
+6. Add mock in `MockProvider`, fixtures in `provider-fixtures.ts`
+7. Update completions in `completions.ts` (bash, zsh, fish — all three)
 
 ### Key Source Directories (`packages/cli/src/`)
 
@@ -81,6 +97,16 @@ If a hook fails, fix the issue and re-stage. Key gotchas:
 
 - ESLint's `markdown/fenced-code-language` rule requires a language tag on ALL fenced code blocks in `.md` files (including SKILL.md). Use `text` for non-code examples.
 - lint-staged only checks staged files — unstaged fixes won't be seen. Stage your fixes before retrying.
+- commitlint rejects non-conventional prefixes like `merge:` — use `chore:` for merge commits.
+
+## CI/CD
+
+### Canary Releases
+
+The `canary.yml` workflow publishes snapshot versions to npm on PR label `canary`. Triggered by `pull_request: types: [labeled]`.
+
+- **To trigger**: add (or remove + re-add) the `canary` label on a PR
+- **Gotcha**: fine-grained PATs need explicit **workflow** permissions to trigger `labeled` events via the API. Without it, `gh pr edit --add-label` silently fails to trigger the workflow. Fix: grant workflow permissions on the PAT, or add the label via the GitHub web UI.
 
 ## Testing Conventions
 

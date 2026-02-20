@@ -123,11 +123,22 @@ This means: "take the `network_name` output from the `docker-network` workspace 
 ## CLI Commands
 
 ```bash
-# Apply/destroy infrastructure
+# Plan and apply infrastructure
+ig plan --env dev                     # preview changes without applying (exit code 2 = changes)
+ig plan --env dev --detailed          # show attribute-level diffs
 ig apply --env dev                    # apply all workspaces in dev environment
 ig apply --env dev --project postgres # apply only the postgres workspace
 ig apply --env dev --no-deps          # apply without running dependencies
 ig destroy --env staging              # destroy all workspaces
+
+# Drift detection and reconciliation
+ig drift --env staging                # detect drift across all workspaces (exit code 2 = drift)
+ig drift --env prod --json            # output structured DriftReport as JSON
+ig drift --env dev --project postgres # check single workspace
+ig refresh --env staging              # refresh state from cloud providers
+ig refresh --env dev --project redis  # refresh single workspace
+ig import aws_instance.web i-123 --project webserver --env staging   # import existing resource
+ig export aws_instance.web i-123 --project webserver --env staging   # generate code to stdout
 
 # Environment management
 ig env select dev                     # select active environment
@@ -159,6 +170,22 @@ ig install-skill --force              # overwrite existing
 | `-v, --verbose`         | Verbose output                                   |
 | `-q, --quiet`           | Quiet output                                     |
 | `--strict`              | Fail on most warnings                            |
+
+### Drift Detection
+
+`ig drift` performs read-only drift detection without modifying state. It uses `terraform plan -refresh-only` / `pulumi refresh --preview-only` under the hood.
+
+- Multi-workspace: orchestrated across dependency levels with output injection
+- `--json` outputs a `DriftReport` with per-workspace drift status and plans
+- Exit code 2 means drift was detected, 0 means in sync
+
+### Import and Export
+
+`ig import` and `ig export` are single-workspace commands (require `--project` and `--env`). Arguments after the command are passed through to the provider:
+
+- **Terraform import**: `ig import <address> <cloud-id> --project <ws> --env <env>`
+- **Pulumi import**: `ig import <type> <name> <cloud-id> --project <ws> --env <env>`
+- **Export/generate code**: same argument patterns, generated code is written to stdout
 
 ## How to Add a New Workspace
 
