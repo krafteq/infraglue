@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import { WorkspaceInterop } from './workspace-interop.js'
 import { Monorepo, Workspace } from './model.js'
-import { MockProvider } from '../__test-utils__/mock-provider.js'
+import { MockProvider, createProviderPlan } from '../__test-utils__/mock-provider.js'
 import { StateManager, State } from './state-manager.js'
 import type { ProviderPlan } from '../providers/provider-plan.js'
 
@@ -81,7 +81,18 @@ describe('WorkspaceInterop', () => {
       expect.objectContaining({ alias: 'ws1', rootPath: '/path/to/ws1' }),
       { key: 'value' },
       'dev',
+      undefined,
     )
+  })
+
+  it('should pass detailed option to provider getPlan', async () => {
+    const { provider, interop } = setup()
+    provider.getPlan.mockResolvedValue(createProviderPlan())
+
+    await interop.getPlan({ key: 'value' }, { detailed: true })
+    expect(provider.getPlan).toHaveBeenCalledWith(expect.objectContaining({ alias: 'ws1' }), { key: 'value' }, 'dev', {
+      detailed: true,
+    })
   })
 
   it('should delegate apply to provider and return outputs', async () => {
@@ -154,6 +165,65 @@ describe('WorkspaceInterop', () => {
     expect(provider.getOutputs).not.toHaveBeenCalled()
   })
 
+  it('should delegate getDriftPlan to provider', async () => {
+    const { provider, interop } = setup()
+    const mockPlan: ProviderPlan = {
+      provider: 'mock',
+      projectName: 'ws1',
+      timestamp: new Date(),
+      resourceChanges: [],
+      outputs: [],
+      diagnostics: [],
+      changeSummary: { add: 0, change: 1, remove: 0, replace: 0, outputUpdates: 0 },
+      metadata: {},
+    }
+    provider.getDriftPlan.mockResolvedValue(mockPlan)
+
+    const result = await interop.getDriftPlan({ key: 'value' })
+    expect(result).toBe(mockPlan)
+    expect(provider.getDriftPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ alias: 'ws1', rootPath: '/path/to/ws1' }),
+      { key: 'value' },
+      'dev',
+    )
+  })
+
+  it('should delegate refresh to provider', async () => {
+    const { provider, interop } = setup()
+    provider.refresh.mockResolvedValue(undefined)
+
+    await interop.refresh({ key: 'value' })
+    expect(provider.refresh).toHaveBeenCalledWith(expect.objectContaining({ alias: 'ws1' }), { key: 'value' }, 'dev')
+  })
+
+  it('should delegate importResource to provider', async () => {
+    const { provider, interop } = setup()
+    provider.importResource.mockResolvedValue('Import successful')
+
+    const result = await interop.importResource(['aws_instance.web', 'i-123'], { key: 'value' })
+    expect(result).toBe('Import successful')
+    expect(provider.importResource).toHaveBeenCalledWith(
+      expect.objectContaining({ alias: 'ws1' }),
+      ['aws_instance.web', 'i-123'],
+      { key: 'value' },
+      'dev',
+    )
+  })
+
+  it('should delegate generateCode to provider', async () => {
+    const { provider, interop } = setup()
+    provider.generateCode.mockResolvedValue('resource "aws_instance" "web" {}')
+
+    const result = await interop.generateCode(['aws_instance.web', 'i-123'], { key: 'value' })
+    expect(result).toBe('resource "aws_instance" "web" {}')
+    expect(provider.generateCode).toHaveBeenCalledWith(
+      expect.objectContaining({ alias: 'ws1' }),
+      ['aws_instance.web', 'i-123'],
+      { key: 'value' },
+      'dev',
+    )
+  })
+
   it('should build correct provider config', async () => {
     const { provider, interop } = setup()
     provider.getPlan.mockResolvedValue({
@@ -178,6 +248,7 @@ describe('WorkspaceInterop', () => {
       }),
       {},
       'dev',
+      undefined,
     )
   })
 })

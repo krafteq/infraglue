@@ -5,7 +5,7 @@ _ig_completions() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  commands="apply destroy config env provider completion install-skill"
+  commands="apply destroy plan drift refresh import export config env provider completion install-skill"
 
   case "\${prev}" in
     ig)
@@ -27,7 +27,7 @@ _ig_completions() {
   esac
 
   if [[ "\${cur}" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--env --format --integration --approve --verbose --quiet --strict --directory --help --json --project --no-deps" -- "\${cur}") )
+    COMPREPLY=( $(compgen -W "--env --format --integration --approve --verbose --quiet --strict --directory --help --json --project --no-deps --detailed --refresh-only" -- "\${cur}") )
   fi
 }
 complete -F _ig_completions ig
@@ -43,6 +43,11 @@ _ig() {
   commands=(
     'apply:Apply infrastructure changes'
     'destroy:Destroy infrastructure'
+    'plan:Preview infrastructure changes without applying'
+    'drift:Detect infrastructure drift'
+    'refresh:Refresh infrastructure state'
+    'import:Import cloud resource into state'
+    'export:Generate code for cloud resources'
     'config:Manage configuration'
     'env:Manage environments'
     'provider:Run provider CLI commands'
@@ -71,8 +76,37 @@ _ig() {
             '(-i --integration)'{-i,--integration}'[Integration mode]:mode:(cli no-tty-cli)' \\
             '(-a --approve)'{-a,--approve}'[Auto-approve level]:level:' \\
             '(-p --project)'{-p,--project}'[Project name]:project:' \\
+            '--no-deps[Ignore dependencies]'
+          ;;
+        plan)
+          _arguments \\
+            '(-e --env)'{-e,--env}'[Environment name]:env:' \\
+            '(-f --format)'{-f,--format}'[Output format]:format:(default)' \\
+            '(-p --project)'{-p,--project}'[Project name]:project:' \\
             '--no-deps[Ignore dependencies]' \\
-            '--json[JSON output]'
+            '--detailed[Show attribute-level diffs]'
+          ;;
+        drift)
+          _arguments \\
+            '(-e --env)'{-e,--env}'[Environment name]:env:' \\
+            '(-f --format)'{-f,--format}'[Output format]:format:(default)' \\
+            '(-p --project)'{-p,--project}'[Project name]:project:' \\
+            '--no-deps[Ignore dependencies]' \\
+            '(-j --json)'{-j,--json}'[JSON output]' \\
+            '--refresh-only[Only check infrastructure drift]'
+          ;;
+        refresh)
+          _arguments \\
+            '(-e --env)'{-e,--env}'[Environment name]:env:' \\
+            '(-f --format)'{-f,--format}'[Output format]:format:(default)' \\
+            '(-p --project)'{-p,--project}'[Project name]:project:' \\
+            '--no-deps[Ignore dependencies]'
+          ;;
+        import|export)
+          _arguments \\
+            '(-e --env)'{-e,--env}'[Environment name]:env:' \\
+            '(-p --project)'{-p,--project}'[Project name]:project:' \\
+            '*:args:'
           ;;
         env)
           local -a env_commands
@@ -107,9 +141,14 @@ export function generateFishCompletion(): string {
 # ig fish completions
 complete -c ig -n '__fish_use_subcommand' -a apply -d 'Apply infrastructure changes'
 complete -c ig -n '__fish_use_subcommand' -a destroy -d 'Destroy infrastructure'
+complete -c ig -n '__fish_use_subcommand' -a plan -d 'Preview infrastructure changes without applying'
 complete -c ig -n '__fish_use_subcommand' -a config -d 'Manage configuration'
 complete -c ig -n '__fish_use_subcommand' -a env -d 'Manage environments'
 complete -c ig -n '__fish_use_subcommand' -a provider -d 'Run provider CLI commands'
+complete -c ig -n '__fish_use_subcommand' -a drift -d 'Detect infrastructure drift'
+complete -c ig -n '__fish_use_subcommand' -a refresh -d 'Refresh infrastructure state'
+complete -c ig -n '__fish_use_subcommand' -a import -d 'Import cloud resource into state'
+complete -c ig -n '__fish_use_subcommand' -a export -d 'Generate code for cloud resources'
 complete -c ig -n '__fish_use_subcommand' -a completion -d 'Output shell completion script'
 complete -c ig -n '__fish_use_subcommand' -a install-skill -d 'Install AI coding agent skill'
 
@@ -120,6 +159,35 @@ complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s i -l integratio
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s a -l approve -d 'Auto-approve level' -r
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s p -l project -d 'Project name' -r
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -l no-deps -d 'Ignore dependencies'
+
+# plan options
+complete -c ig -n '__fish_seen_subcommand_from plan' -s e -l env -d 'Environment name' -r
+complete -c ig -n '__fish_seen_subcommand_from plan' -s f -l format -d 'Output format' -r
+complete -c ig -n '__fish_seen_subcommand_from plan' -s p -l project -d 'Project name' -r
+complete -c ig -n '__fish_seen_subcommand_from plan' -l no-deps -d 'Ignore dependencies'
+complete -c ig -n '__fish_seen_subcommand_from plan' -l detailed -d 'Show attribute-level diffs'
+
+# drift options
+complete -c ig -n '__fish_seen_subcommand_from drift' -s e -l env -d 'Environment name' -r
+complete -c ig -n '__fish_seen_subcommand_from drift' -s f -l format -d 'Output format' -r
+complete -c ig -n '__fish_seen_subcommand_from drift' -s p -l project -d 'Project name' -r
+complete -c ig -n '__fish_seen_subcommand_from drift' -l no-deps -d 'Ignore dependencies'
+complete -c ig -n '__fish_seen_subcommand_from drift' -s j -l json -d 'JSON output'
+complete -c ig -n '__fish_seen_subcommand_from drift' -l refresh-only -d 'Only check infrastructure drift'
+
+# refresh options
+complete -c ig -n '__fish_seen_subcommand_from refresh' -s e -l env -d 'Environment name' -r
+complete -c ig -n '__fish_seen_subcommand_from refresh' -s f -l format -d 'Output format' -r
+complete -c ig -n '__fish_seen_subcommand_from refresh' -s p -l project -d 'Project name' -r
+complete -c ig -n '__fish_seen_subcommand_from refresh' -l no-deps -d 'Ignore dependencies'
+
+# import options
+complete -c ig -n '__fish_seen_subcommand_from import' -s e -l env -d 'Environment name' -r
+complete -c ig -n '__fish_seen_subcommand_from import' -s p -l project -d 'Project name' -r
+
+# export options
+complete -c ig -n '__fish_seen_subcommand_from export' -s e -l env -d 'Environment name' -r
+complete -c ig -n '__fish_seen_subcommand_from export' -s p -l project -d 'Project name' -r
 
 # env subcommands
 complete -c ig -n '__fish_seen_subcommand_from env; and not __fish_seen_subcommand_from select current' -a select -d 'Select an environment'

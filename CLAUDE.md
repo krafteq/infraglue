@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 InfraGlue (`ig`) is a CLI tool for managing Infrastructure as Code monorepos. It orchestrates multiple Terraform/Pulumi workspaces by resolving dependencies, managing environments, and injecting outputs between workspaces. The main package is `@krafteq/infraglue` in `packages/cli/`.
 
+## Feature Requests
+
+Feature requests are stored in `.feature-requests/` directory (e.g., `.feature-requests/fr-001-plan-command.md`).
+
+## Packaged Skill
+
+`packages/cli/skill/SKILL.md` is the AI coding agent skill shipped with the npm package (installed via `ig install-skill`). **All new features, commands, and behavior changes MUST be reflected in this skill file.** It is the primary documentation that AI agents use to understand ig's capabilities, commands, and configuration format.
+
 ## Common Commands
 
 ```bash
@@ -34,6 +42,18 @@ pnpm destroy                             # destroy all workspaces in example
 ### Core Flow
 
 `index.ts` (Commander.js CLI) → `monorepo-reader.ts` (parse ig.yaml configs) → `model.ts` (build Monorepo/Workspace graph) → `multistage-executor.ts` (topological sort into levels, execute sequentially) → providers (Terraform/Pulumi commands)
+
+### IProvider Interface
+
+All provider operations go through `IProvider` → `WorkspaceInterop` (delegation + state caching) → `MultistageExecutor` (orchestration). When adding a new provider operation:
+
+1. Add method to `IProvider` in `provider.ts`
+2. Implement in both `TerraformProvider` and `PulumiProvider`
+3. Add delegation method in `WorkspaceInterop`
+4. Add orchestration method in `MultistageExecutor` (if multi-workspace)
+5. Register CLI command in `index.ts`
+6. Add mock in `MockProvider`, fixtures in `provider-fixtures.ts`
+7. Update completions in `completions.ts` (bash, zsh, fish — all three)
 
 ### Key Source Directories (`packages/cli/src/`)
 
@@ -77,6 +97,16 @@ If a hook fails, fix the issue and re-stage. Key gotchas:
 
 - ESLint's `markdown/fenced-code-language` rule requires a language tag on ALL fenced code blocks in `.md` files (including SKILL.md). Use `text` for non-code examples.
 - lint-staged only checks staged files — unstaged fixes won't be seen. Stage your fixes before retrying.
+- commitlint rejects non-conventional prefixes like `merge:` — use `chore:` for merge commits.
+
+## CI/CD
+
+### Canary Releases
+
+The `canary.yml` workflow publishes snapshot versions to npm on PR label `canary`. Triggered by `pull_request: types: [labeled]`.
+
+- **To trigger**: add (or remove + re-add) the `canary` label on a PR
+- **Gotcha**: fine-grained PATs need explicit **workflow** permissions to trigger `labeled` events via the API. Without it, `gh pr edit --add-label` silently fails to trigger the workflow. Fix: grant workflow permissions on the PAT, or add the label via the GitHub web UI.
 
 ## Testing Conventions
 
@@ -105,6 +135,17 @@ Every new feature or bug fix MUST include tests. Run `pnpm test:all` before cons
 | State persistence                     | Real temp directories (mkdtemp + cleanup)           | `state-manager.e2e.test.ts`                       |
 | Orchestration (executor, env-manager) | `vi.mock` dependencies, assert interaction sequence | `multistage-executor.test.ts`                     |
 | Adapters (workspace-interop)          | MockProvider with vi.fn spies, mock StateManager    | `workspace-interop.test.ts`                       |
+| Provider-dependent logic              | Parse real provider output → feed into function     | `plan-diff.e2e.test.ts`                           |
+
+### E2E Tests for Provider-Dependent Logic
+
+Any new functionality that processes or depends on real Terraform/Pulumi output shapes (e.g., `ResourceChange`, `ProviderPlan`) **MUST** include e2e tests that:
+
+1. Parse raw provider CLI output from `provider-fixtures.ts` through the real provider parser (`parseTerraformPlanOutput` / `parsePulumiPreviewOutput`)
+2. Feed the resulting typed structures into the new function
+3. Assert correct behavior against both Terraform and Pulumi output shapes (they differ — e.g., Pulumi uses `oldState.inputs`/`newState.inputs`, Terraform uses inline `before`/`after`)
+
+This catches integration issues that unit tests with hand-crafted `ResourceChange` objects would miss (e.g., unexpected field shapes, nested structures, null patterns). Add new fixtures to `provider-fixtures.ts` when existing ones don't cover the scenario.
 
 ### Patterns
 

@@ -1,6 +1,13 @@
 ---
 name: infraglue
-description: InfraGlue (ig) CLI tool for managing Infrastructure as Code monorepos with Terraform and Pulumi workspace orchestration
+description: >
+  InfraGlue (ig) — CLI tool for managing Infrastructure as Code (IaC) monorepos.
+  Orchestrates Terraform and Pulumi workspaces with dependency resolution, output injection,
+  environment management, drift detection, and state reconciliation.
+  Use this skill when working with ig.yaml configs, ig CLI commands, or multi-workspace
+  Terraform/Pulumi infrastructure projects.
+  Keywords: terraform, pulumi, infrastructure, IaC, monorepo, workspace, ig, infraglue,
+  drift, plan, apply, destroy, import, export, refresh, environment.
 user-invokable: false
 ---
 
@@ -123,11 +130,22 @@ This means: "take the `network_name` output from the `docker-network` workspace 
 ## CLI Commands
 
 ```bash
-# Apply/destroy infrastructure
+# Plan and apply infrastructure
+ig plan --env dev                     # preview changes without applying (exit code 2 = changes)
+ig plan --env dev --detailed          # show attribute-level diffs
 ig apply --env dev                    # apply all workspaces in dev environment
 ig apply --env dev --project postgres # apply only the postgres workspace
 ig apply --env dev --no-deps          # apply without running dependencies
 ig destroy --env staging              # destroy all workspaces
+
+# Drift detection and reconciliation
+ig drift --env staging                # detect drift across all workspaces (exit code 2 = drift)
+ig drift --env prod --json            # output structured DriftReport as JSON
+ig drift --env dev --project postgres # check single workspace
+ig refresh --env staging              # refresh state from cloud providers
+ig refresh --env dev --project redis  # refresh single workspace
+ig import aws_instance.web i-123 --project webserver --env staging   # import existing resource
+ig export aws_instance.web i-123 --project webserver --env staging   # generate code to stdout
 
 # Environment management
 ig env select dev                     # select active environment
@@ -151,6 +169,35 @@ ig install-skill                      # install into .claude/skills/infraglue/SK
 ig install-skill --force              # overwrite existing
 ```
 
+### Non-Interactive / CI / Agent Usage
+
+When running from CI, a coding agent, or any non-TTY environment, ig auto-detects the context and disables interactive prompts. **Always prefer non-interactive flags** to avoid hanging on confirmation prompts.
+
+```bash
+# Plan is always non-interactive — just check exit code
+ig plan --env dev --project myws        # exit code: 0 = no changes, 2 = changes found
+ig plan --env dev --detailed            # classify changes as metadata-only vs real
+
+# Apply with auto-approve (level index is 1-based)
+ig apply --env dev --approve 1          # auto-approve level 1 (no confirmation prompt)
+ig apply --env dev --approve 2          # auto-approve level 2
+ig destroy --env dev --approve 1        # auto-approve destroy
+
+# Drift detection with JSON output for programmatic consumption
+ig drift --env staging --json           # outputs DriftReport JSON to stdout
+
+# Config inspection
+ig config show --json                   # parsed monorepo config as JSON
+```
+
+**Key points for automation:**
+
+- `ig plan` and `ig drift` are read-only and fully non-interactive
+- `ig apply` / `ig destroy` require `--approve <level>` to skip the confirmation prompt. Without it, the command waits for confirmation
+- `--approve` is 1-indexed and applies to a **single level only**. Multi-level monorepos require a separate invocation per level (e.g., `--approve 1`, then `--approve 2`). There is no way to approve all levels at once
+- When no TTY is detected (CI, piped output, agent subprocess), ig auto-selects the `no-tty-cli` integration which suppresses interactive prompts
+- Exit codes: `0` = success/no changes, `1` = error, `2` = changes detected (plan/drift)
+
 ### Global Options
 
 | Option                  | Description                                      |
@@ -159,6 +206,28 @@ ig install-skill --force              # overwrite existing
 | `-v, --verbose`         | Verbose output                                   |
 | `-q, --quiet`           | Quiet output                                     |
 | `--strict`              | Fail on most warnings                            |
+
+### Drift Detection
+
+`ig drift` detects two types of drift without modifying state:
+
+- **Infrastructure drift** (cloud ≠ state): resources changed outside IaC. Uses `terraform plan -refresh-only` / `pulumi refresh --preview-only`.
+- **Configuration drift** (code ≠ state): code changes not yet applied (e.g., removed resources still in state). Uses `terraform plan -refresh=false` / `pulumi preview` (refresh disabled to isolate code-vs-state changes from cloud drift).
+
+Both checks run per workspace by default. Use `--refresh-only` to skip configuration drift and only check infrastructure drift.
+
+- Multi-workspace: orchestrated across dependency levels with output injection
+- `--json` outputs a `DriftReport` with per-workspace drift status including `infrastructureDrift` and `configurationDrift` sub-reports
+- `--refresh-only` skips configuration drift check (only cloud vs state)
+- Exit code 2 means drift was detected, 0 means in sync
+
+### Import and Export
+
+`ig import` and `ig export` are single-workspace commands (require `--project` and `--env`). Arguments after the command are passed through to the provider:
+
+- **Terraform import**: `ig import <address> <cloud-id> --project <ws> --env <env>`
+- **Pulumi import**: `ig import <type> <name> <cloud-id> --project <ws> --env <env>`
+- **Export/generate code**: same argument patterns, generated code is written to stdout
 
 ## How to Add a New Workspace
 

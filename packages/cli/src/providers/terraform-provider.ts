@@ -1,7 +1,7 @@
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { basename, extname, join } from 'path'
-import { readdir, copyFile, rm, access, constants, writeFile } from 'fs/promises'
+import { readdir, readFile, copyFile, rm, access, constants, writeFile } from 'fs/promises'
 import type { IProvider, ProviderConfig } from './provider.js'
 import type { ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provider-plan.js'
@@ -17,10 +17,32 @@ class TerraformProvider implements IProvider {
     return 'terraform'
   }
 
-  async getPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
+  async getPlan(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    environment: string,
+    options?: { detailed?: boolean; refresh?: boolean },
+  ): Promise<ProviderPlan> {
     const variables = await this.getVariableString(configuration, input, environment)
+    const refreshFlag = options?.refresh === false ? '-refresh=false ' : ''
 
-    const stdout = await this.execCommand(`terraform plan --json ${variables}`, configuration)
+    if (options?.detailed) {
+      const stateManager = new StateManager(configuration.rootMonoRepoFolder)
+      const planFile = await stateManager.storeWorkspaceTempFile(configuration.rootPath, 'ig-plan.bin', '')
+
+      const stdout = await this.execCommand(
+        `terraform plan ${refreshFlag}-out=${planFile} --json ${variables}`,
+        configuration,
+      )
+      const plan = this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
+
+      const showOutput = await this.execCommand(`terraform show -json ${planFile}`, configuration)
+      await rm(join(configuration.rootPath, planFile)).catch(() => {})
+
+      return enrichPlanWithShowOutput(plan, showOutput)
+    }
+
+    const stdout = await this.execCommand(`terraform plan ${refreshFlag}--json ${variables}`, configuration)
 
     return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
   }
@@ -150,6 +172,50 @@ class TerraformProvider implements IProvider {
     return `${filesStr} -var-file=${tempVarFile}`
   }
 
+  async getDriftPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
+    const variables = await this.getVariableString(configuration, input, environment)
+
+    const stdout = await this.execCommand(`terraform plan -refresh-only --json ${variables}`, configuration)
+
+    return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
+  }
+
+  async refresh(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<void> {
+    const variables = await this.getVariableString(configuration, input, environment)
+
+    await this.execCommand(`terraform apply -refresh-only -auto-approve --json ${variables}`, configuration)
+  }
+
+  async importResource(
+    configuration: ProviderConfig,
+    args: string[],
+    input: ProviderInput,
+    environment: string,
+  ): Promise<string> {
+    const variables = await this.getVariableString(configuration, input, environment)
+
+    return await this.execCommand(`terraform import ${variables} ${args.join(' ')}`, configuration)
+  }
+
+  async generateCode(
+    configuration: ProviderConfig,
+    args: string[],
+    input: ProviderInput,
+    environment: string,
+  ): Promise<string> {
+    const variables = await this.getVariableString(configuration, input, environment)
+    const stateManager = new StateManager(configuration.rootMonoRepoFolder)
+    const tempFile = await stateManager.storeWorkspaceTempFile(configuration.rootPath, 'generated.tf', '')
+
+    await this.execCommand(
+      `terraform plan -generate-config-out=${tempFile} --json ${variables} ${args.join(' ')}`,
+      configuration,
+    )
+
+    const generatedPath = join(configuration.rootPath, tempFile)
+    return await readFile(generatedPath, 'utf-8')
+  }
+
   async execAnyCommand(
     command: string[],
     configuration: ProviderConfig,
@@ -244,8 +310,8 @@ export function parseTerraformPlanOutput(terraformOutput: string, projectName: s
         name: resource.resource_name,
         actions: [change.action],
         status: 'pending',
-        before: change.before,
-        after: change.after,
+        before: change.before ?? null,
+        after: change.after ?? null,
         metadata: {},
       })
     }
@@ -305,4 +371,29 @@ export function parseTerraformPlanOutput(terraformOutput: string, projectName: s
     changeSummary,
     metadata: { rawOutput: terraformOutput },
   }
+}
+
+export function enrichPlanWithShowOutput(plan: ProviderPlan, showOutput: string): ProviderPlan {
+  const showData = JSON.parse(showOutput)
+  const detailsByAddress = new Map<
+    string,
+    { before: Record<string, unknown> | null; after: Record<string, unknown> | null }
+  >()
+
+  for (const rc of showData.resource_changes ?? []) {
+    detailsByAddress.set(rc.address, {
+      before: rc.change?.before ?? null,
+      after: rc.change?.after ?? null,
+    })
+  }
+
+  const enrichedChanges = plan.resourceChanges.map((rc) => {
+    const detail = detailsByAddress.get(rc.address)
+    if (detail) {
+      return { ...rc, before: detail.before, after: detail.after }
+    }
+    return rc
+  })
+
+  return { ...plan, resourceChanges: enrichedChanges }
 }

@@ -38,8 +38,8 @@ export class WorkspaceInterop {
     return { outputs, actual: true }
   }
 
-  public getPlan(input: ProviderInput): Promise<ProviderPlan> {
-    return this.provider.getPlan(this.providerConfig(), input, this.env)
+  public getPlan(input: ProviderInput, options?: { detailed?: boolean; refresh?: boolean }): Promise<ProviderPlan> {
+    return this.provider.getPlan(this.providerConfig(), input, this.env, options)
   }
 
   public async apply(input: ProviderInput): Promise<ProviderOutput> {
@@ -69,6 +69,22 @@ export class WorkspaceInterop {
 
   public existsInFolder(folderPath: string): Promise<boolean> {
     return this.provider.existsInFolder(folderPath)
+  }
+
+  public getDriftPlan(input: ProviderInput): Promise<ProviderPlan> {
+    return this.provider.getDriftPlan(this.providerConfig(), input, this.env)
+  }
+
+  public refresh(input: ProviderInput): Promise<void> {
+    return this.provider.refresh(this.providerConfig(), input, this.env)
+  }
+
+  public importResource(args: string[], input: ProviderInput): Promise<string> {
+    return this.provider.importResource(this.providerConfig(), args, input, this.env)
+  }
+
+  public generateCode(args: string[], input: ProviderInput): Promise<string> {
+    return this.provider.generateCode(this.providerConfig(), args, input, this.env)
   }
 
   public execAnyCommand(command: string[], input: () => Promise<ProviderInput>): Promise<void> {
