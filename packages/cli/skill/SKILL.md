@@ -209,10 +209,16 @@ ig config show --json                   # parsed monorepo config as JSON
 
 ### Drift Detection
 
-`ig drift` performs read-only drift detection without modifying state. It uses `terraform plan -refresh-only` / `pulumi refresh --preview-only` under the hood.
+`ig drift` detects two types of drift without modifying state:
+
+- **Infrastructure drift** (cloud ≠ state): resources changed outside IaC. Uses `terraform plan -refresh-only` / `pulumi refresh --preview-only`.
+- **Configuration drift** (code ≠ state): code changes not yet applied (e.g., removed resources still in state). Uses a regular `terraform plan` / `pulumi preview`.
+
+Both checks run per workspace by default. Use `--refresh-only` to skip configuration drift and only check infrastructure drift.
 
 - Multi-workspace: orchestrated across dependency levels with output injection
-- `--json` outputs a `DriftReport` with per-workspace drift status and plans
+- `--json` outputs a `DriftReport` with per-workspace drift status including `infrastructureDrift` and `configurationDrift` sub-reports
+- `--refresh-only` skips configuration drift check (only cloud vs state)
 - Exit code 2 means drift was detected, 0 means in sync
 
 ### Import and Export

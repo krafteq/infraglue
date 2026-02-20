@@ -225,13 +225,15 @@ program
   .option('-e, --env <env>', 'Environment to check')
   .option('--no-deps', 'Ignore dependencies')
   .option('-j, --json', 'Output drift report as JSON')
+  .option('--refresh-only', 'Only check infrastructure drift (cloud vs state), skip configuration drift')
   .addHelpText(
     'after',
     `
 Examples:
   $ ig drift --env staging
   $ ig drift --env production --project postgres
-  $ ig drift --env dev --json`,
+  $ ig drift --env dev --json
+  $ ig drift --env dev --refresh-only`,
   )
   .action(
     async ({
@@ -240,12 +242,14 @@ Examples:
       project,
       deps,
       json,
+      refreshOnly,
     }: {
       format?: string
       env: string
       project?: string
       deps: boolean
       json?: boolean
+      refreshOnly?: boolean
     }) => {
       const monorepo = requireMonorepo()
       env = await resolveEnv(env)
@@ -253,6 +257,7 @@ Examples:
       const result = await new MultistageExecutor(execContext).drift({
         formatter: getFormatter(format),
         json: json ?? false,
+        refreshOnly: refreshOnly ?? false,
       })
       if (json) {
         process.stdout.write(JSON.stringify(result.report, null, 2) + '\n')

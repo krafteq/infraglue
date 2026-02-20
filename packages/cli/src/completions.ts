@@ -27,7 +27,7 @@ _ig_completions() {
   esac
 
   if [[ "\${cur}" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--env --format --integration --approve --verbose --quiet --strict --directory --help --json --project --no-deps --detailed" -- "\${cur}") )
+    COMPREPLY=( $(compgen -W "--env --format --integration --approve --verbose --quiet --strict --directory --help --json --project --no-deps --detailed --refresh-only" -- "\${cur}") )
   fi
 }
 complete -F _ig_completions ig
@@ -92,7 +92,8 @@ _ig() {
             '(-f --format)'{-f,--format}'[Output format]:format:(default)' \\
             '(-p --project)'{-p,--project}'[Project name]:project:' \\
             '--no-deps[Ignore dependencies]' \\
-            '(-j --json)'{-j,--json}'[JSON output]'
+            '(-j --json)'{-j,--json}'[JSON output]' \\
+            '--refresh-only[Only check infrastructure drift]'
           ;;
         refresh)
           _arguments \\
@@ -172,6 +173,7 @@ complete -c ig -n '__fish_seen_subcommand_from drift' -s f -l format -d 'Output 
 complete -c ig -n '__fish_seen_subcommand_from drift' -s p -l project -d 'Project name' -r
 complete -c ig -n '__fish_seen_subcommand_from drift' -l no-deps -d 'Ignore dependencies'
 complete -c ig -n '__fish_seen_subcommand_from drift' -s j -l json -d 'JSON output'
+complete -c ig -n '__fish_seen_subcommand_from drift' -l refresh-only -d 'Only check infrastructure drift'
 
 # refresh options
 complete -c ig -n '__fish_seen_subcommand_from refresh' -s e -l env -d 'Environment name' -r

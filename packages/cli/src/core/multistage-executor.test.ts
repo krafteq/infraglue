@@ -538,6 +538,7 @@ describe('MultistageExecutor', () => {
       const executor = new MultistageExecutor(ctx)
 
       mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetPlan.mockResolvedValue(createProviderPlan())
       mockGetOutputs.mockResolvedValue({ outputs: { existing: 'value' }, actual: true })
 
       const result = await executor.drift({ formatter: createFormatter() })
@@ -546,9 +547,11 @@ describe('MultistageExecutor', () => {
       expect(result.report.hasDrift).toBe(false)
       expect(result.report.workspaces).toHaveLength(1)
       expect(result.report.workspaces[0].hasDrift).toBe(false)
+      expect(result.report.workspaces[0].infrastructureDrift.hasDrift).toBe(false)
+      expect(result.report.workspaces[0].configurationDrift.hasDrift).toBe(false)
     })
 
-    it('should return hasDrift: true when drift is detected', async () => {
+    it('should return hasDrift: true when infrastructure drift is detected', async () => {
       envSelected()
       const ws1 = createWs('ws1')
       const monorepo = new Monorepo('/root', [ws1], [], undefined)
@@ -558,11 +561,14 @@ describe('MultistageExecutor', () => {
       mockGetDriftPlan.mockResolvedValue(
         createProviderPlan({ changeSummary: { add: 0, change: 1, remove: 0, replace: 0, outputUpdates: 0 } }),
       )
+      mockGetPlan.mockResolvedValue(createProviderPlan())
 
       const result = await executor.drift({ formatter: createFormatter() })
 
       expect(result.hasDrift).toBe(true)
       expect(result.report.workspaces[0].hasDrift).toBe(true)
+      expect(result.report.workspaces[0].infrastructureDrift.hasDrift).toBe(true)
+      expect(result.report.workspaces[0].configurationDrift.hasDrift).toBe(false)
     })
 
     it('should collect drift reports across multiple levels', async () => {
@@ -573,18 +579,19 @@ describe('MultistageExecutor', () => {
       const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
       const executor = new MultistageExecutor(ctx)
 
-      let callCount = 0
+      let driftCallCount = 0
       mockGetDriftPlan.mockImplementation(async () => {
-        callCount++
-        if (callCount === 1) {
+        driftCallCount++
+        if (driftCallCount === 1) {
           // ws1 has no drift
           return createProviderPlan()
         }
-        // ws2 has drift
+        // ws2 has infra drift
         return createProviderPlan({
           changeSummary: { add: 0, change: 1, remove: 0, replace: 0, outputUpdates: 0 },
         })
       })
+      mockGetPlan.mockResolvedValue(createProviderPlan())
       mockGetOutputs.mockResolvedValue({ outputs: { key: 'val' }, actual: true })
 
       const result = await executor.drift({ formatter: createFormatter() })
@@ -592,7 +599,9 @@ describe('MultistageExecutor', () => {
       expect(result.hasDrift).toBe(true)
       expect(result.report.workspaces).toHaveLength(2)
       expect(result.report.workspaces[0].hasDrift).toBe(false)
+      expect(result.report.workspaces[0].infrastructureDrift.hasDrift).toBe(false)
       expect(result.report.workspaces[1].hasDrift).toBe(true)
+      expect(result.report.workspaces[1].infrastructureDrift.hasDrift).toBe(true)
     })
 
     it('should store outputs for no-drift workspaces for downstream injection', async () => {
@@ -604,6 +613,7 @@ describe('MultistageExecutor', () => {
       const executor = new MultistageExecutor(ctx)
 
       mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetPlan.mockResolvedValue(createProviderPlan())
       mockGetOutputs.mockResolvedValue({ outputs: { net: 'dev_net' }, actual: true })
 
       await executor.drift({ formatter: createFormatter() })
@@ -620,12 +630,14 @@ describe('MultistageExecutor', () => {
       const executor = new MultistageExecutor(ctx)
 
       mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetPlan.mockResolvedValue(createProviderPlan())
       mockGetOutputs.mockResolvedValue({ outputs: {}, actual: true })
 
       const result = await executor.drift({ formatter: createFormatter() })
 
       expect(result.hasDrift).toBe(false)
       expect(mockGetDriftPlan).toHaveBeenCalledTimes(1)
+      expect(mockGetPlan).toHaveBeenCalledTimes(1)
     })
 
     it('should validate env', async () => {
@@ -648,12 +660,93 @@ describe('MultistageExecutor', () => {
       const executor = new MultistageExecutor(ctx)
 
       mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetPlan.mockResolvedValue(createProviderPlan())
       mockGetOutputs.mockResolvedValue({ outputs: {}, actual: true })
 
       const result = await executor.drift({ formatter: createFormatter() })
 
       expect(result.report.environment).toBe('dev')
       expect(result.report.timestamp).toBeTruthy()
+    })
+
+    it('should detect configuration drift only (no infrastructure drift)', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 0, change: 0, remove: 1, replace: 0, outputUpdates: 0 } }),
+      )
+
+      const result = await executor.drift({ formatter: createFormatter() })
+
+      expect(result.hasDrift).toBe(true)
+      expect(result.report.workspaces[0].hasDrift).toBe(true)
+      expect(result.report.workspaces[0].infrastructureDrift.hasDrift).toBe(false)
+      expect(result.report.workspaces[0].configurationDrift.hasDrift).toBe(true)
+      expect(result.report.workspaces[0].configurationDrift.plan).not.toBeNull()
+    })
+
+    it('should detect both infrastructure and configuration drift simultaneously', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetDriftPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 0, change: 1, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 0, change: 0, remove: 1, replace: 0, outputUpdates: 0 } }),
+      )
+
+      const result = await executor.drift({ formatter: createFormatter() })
+
+      expect(result.hasDrift).toBe(true)
+      expect(result.report.workspaces[0].infrastructureDrift.hasDrift).toBe(true)
+      expect(result.report.workspaces[0].configurationDrift.hasDrift).toBe(true)
+    })
+
+    it('should skip configuration drift check when --refresh-only is set', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetOutputs.mockResolvedValue({ outputs: {}, actual: true })
+
+      const result = await executor.drift({ formatter: createFormatter(), refreshOnly: true })
+
+      expect(mockGetPlan).not.toHaveBeenCalled()
+      expect(result.hasDrift).toBe(false)
+      expect(result.report.workspaces[0].configurationDrift.hasDrift).toBe(false)
+      expect(result.report.workspaces[0].configurationDrift.plan).toBeNull()
+    })
+
+    it('should not store outputs when workspace has configuration drift', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      // ws1: no infra drift but has config drift
+      mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      await executor.drift({ formatter: createFormatter() })
+
+      expect(mockGetOutputs).not.toHaveBeenCalled()
+      expect(ctx.findAppliedOutput('ws1', 'net')).toBeUndefined()
     })
   })
 

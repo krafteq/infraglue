@@ -287,22 +287,50 @@ export class MultistageExecutor {
         const inputs: ProviderInput = await this.ctx.getInputs(workspace)
         const interop = this.ctx.interop(workspace)
 
-        const plan = await interop.getDriftPlan(inputs)
-        const wsDrift = hasChanges(plan)
+        // Infrastructure drift: cloud ≠ state (always run)
+        const infraPlan = await interop.getDriftPlan(inputs)
+        const hasInfraDrift = hasChanges(infraPlan)
+
+        // Configuration drift: code ≠ state (skip when --refresh-only)
+        let configPlan: ProviderPlan | null = null
+        let hasConfigDrift = false
+        if (!opts.refreshOnly) {
+          configPlan = await interop.getPlan(inputs)
+          hasConfigDrift = hasChanges(configPlan)
+        }
+
+        const wsDrift = hasInfraDrift || hasConfigDrift
 
         workspaceReports.push({
           name: workspace.name,
           provider: workspace.providerName,
           hasDrift: wsDrift,
-          plan,
+          plan: infraPlan,
+          infrastructureDrift: {
+            hasDrift: hasInfraDrift,
+            plan: infraPlan,
+          },
+          configurationDrift: {
+            hasDrift: hasConfigDrift,
+            plan: configPlan,
+          },
         })
 
         if (wsDrift) {
           hasDrift = true
-          logger.info(`⚠️  ${workspace.name} has drift`)
-          if (!opts.json) {
-            const formatted = opts.formatter.format(plan)
-            logger.info(`Plan:\n${formatted}`)
+          if (hasInfraDrift) {
+            logger.info(`⚠️  ${workspace.name} has infrastructure drift (cloud ≠ state)`)
+            if (!opts.json) {
+              const formatted = opts.formatter.format(infraPlan)
+              logger.info(`Plan:\n${formatted}`)
+            }
+          }
+          if (hasConfigDrift) {
+            logger.info(`⚠️  ${workspace.name} has configuration drift (code ≠ state)`)
+            if (!opts.json && configPlan) {
+              const formatted = opts.formatter.format(configPlan)
+              logger.info(`Plan:\n${formatted}`)
+            }
           }
         } else {
           logger.info(`✅ ${workspace.name} is in sync`)
@@ -355,6 +383,7 @@ export class MultistageExecutor {
 export interface IDriftOptions {
   formatter: IFormatter
   json?: boolean
+  refreshOnly?: boolean
 }
 
 export interface DriftReport {
@@ -369,6 +398,14 @@ export interface WorkspaceDriftReport {
   provider: string
   hasDrift: boolean
   plan: ProviderPlan
+  infrastructureDrift: {
+    hasDrift: boolean
+    plan: ProviderPlan
+  }
+  configurationDrift: {
+    hasDrift: boolean
+    plan: ProviderPlan | null
+  }
 }
 
 export interface DriftResult {
