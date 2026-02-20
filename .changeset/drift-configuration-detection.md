@@ -13,3 +13,6 @@
 - Fix `ig plan --detailed` crash when `before`/`after` values are undefined in plan diff
 - Fix `ig plan --detailed` to use `terraform show -json` for accurate attribute-level diffs
 - Fix `ig plan --detailed` to skip duplicate formatted plan output when detailed view is shown
+- Fix `ig drift` duplicate output by using `terraform plan -refresh=false` for configuration drift check
+- Fix `ig apply --approve` to skip confirmation prompt in both interactive and non-interactive modes
+- Fix `ig apply` duplicate plan output — formatted plan now appears once in the confirmation message instead of twice
