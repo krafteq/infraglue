@@ -38,7 +38,7 @@ export class WorkspaceInterop {
     return { outputs, actual: true }
   }
 
-  public getPlan(input: ProviderInput, options?: { detailed?: boolean }): Promise<ProviderPlan> {
+  public getPlan(input: ProviderInput, options?: { detailed?: boolean; refresh?: boolean }): Promise<ProviderPlan> {
     return this.provider.getPlan(this.providerConfig(), input, this.env, options)
   }
 

@@ -21,15 +21,19 @@ class TerraformProvider implements IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     environment: string,
-    options?: { detailed?: boolean },
+    options?: { detailed?: boolean; refresh?: boolean },
   ): Promise<ProviderPlan> {
     const variables = await this.getVariableString(configuration, input, environment)
+    const refreshFlag = options?.refresh === false ? '-refresh=false ' : ''
 
     if (options?.detailed) {
       const stateManager = new StateManager(configuration.rootMonoRepoFolder)
       const planFile = await stateManager.storeWorkspaceTempFile(configuration.rootPath, 'ig-plan.bin', '')
 
-      const stdout = await this.execCommand(`terraform plan -out=${planFile} --json ${variables}`, configuration)
+      const stdout = await this.execCommand(
+        `terraform plan ${refreshFlag}-out=${planFile} --json ${variables}`,
+        configuration,
+      )
       const plan = this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
 
       const showOutput = await this.execCommand(`terraform show -json ${planFile}`, configuration)
@@ -38,7 +42,7 @@ class TerraformProvider implements IProvider {
       return enrichPlanWithShowOutput(plan, showOutput)
     }
 
-    const stdout = await this.execCommand(`terraform plan --json ${variables}`, configuration)
+    const stdout = await this.execCommand(`terraform plan ${refreshFlag}--json ${variables}`, configuration)
 
     return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
   }

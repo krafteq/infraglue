@@ -292,10 +292,11 @@ export class MultistageExecutor {
         const hasInfraDrift = hasChanges(infraPlan)
 
         // Configuration drift: code ≠ state (skip when --refresh-only)
+        // refresh: false prevents terraform from re-checking cloud state, isolating code-vs-state changes
         let configPlan: ProviderPlan | null = null
         let hasConfigDrift = false
         if (!opts.refreshOnly) {
-          configPlan = await interop.getPlan(inputs)
+          configPlan = await interop.getPlan(inputs, { refresh: false })
           hasConfigDrift = hasChanges(configPlan)
         }
 

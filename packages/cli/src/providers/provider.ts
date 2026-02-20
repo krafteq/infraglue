@@ -34,7 +34,7 @@ export interface IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     env: string,
-    options?: { detailed?: boolean },
+    options?: { detailed?: boolean; refresh?: boolean },
   ): Promise<ProviderPlan>
   apply(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderOutput>
   getOutputs(configuration: ProviderConfig, env: string): Promise<ProviderOutput>

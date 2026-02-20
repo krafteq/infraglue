@@ -21,7 +21,7 @@ class PulumiProvider implements IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     env: string,
-    _options?: { detailed?: boolean },
+    _options?: { detailed?: boolean; refresh?: boolean },
   ): Promise<ProviderPlan> {
     await this.setPulumiConfig(configuration, input, env)
 

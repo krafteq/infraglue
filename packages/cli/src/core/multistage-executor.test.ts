@@ -711,6 +711,22 @@ describe('MultistageExecutor', () => {
       expect(result.report.workspaces[0].configurationDrift.hasDrift).toBe(true)
     })
 
+    it('should call getPlan with refresh: false to isolate configuration drift', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetPlan.mockResolvedValue(createProviderPlan())
+      mockGetOutputs.mockResolvedValue({ outputs: {}, actual: true })
+
+      await executor.drift({ formatter: createFormatter() })
+
+      expect(mockGetPlan).toHaveBeenCalledWith(expect.anything(), { refresh: false })
+    })
+
     it('should skip configuration drift check when --refresh-only is set', async () => {
       envSelected()
       const ws1 = createWs('ws1')
