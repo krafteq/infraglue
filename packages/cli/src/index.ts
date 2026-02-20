@@ -17,6 +17,7 @@ import { getFormatter } from './formatters/index.js'
 import { getIntegration } from './integrations/index.js'
 import { logger, UserError, IgError, isDebug, formatUnexpectedError, detectIntegration } from './utils/index.js'
 import { generateBashCompletion, generateZshCompletion, generateFishCompletion } from './completions.js'
+import { installSkill } from './install-skill.js'
 import pc from 'picocolors'
 
 export async function getPackageJsonVersion(): Promise<string> {
@@ -210,6 +211,15 @@ Examples:
       default:
         throw new UserError(`Unknown shell '${shell}'. Supported: bash, zsh, fish.`)
     }
+  })
+
+program
+  .command('install-skill')
+  .description('Install the InfraGlue skill for AI coding agents (e.g., Claude Code)')
+  .option('--force', 'Overwrite existing skill file')
+  .action(async (options: { force?: boolean }) => {
+    const { destPath, overwritten } = await installSkill(currentDir, { force: options.force ?? false })
+    logger.info(overwritten ? `Updated ${destPath}` : `Installed ${destPath}`)
   })
 
 // Enhanced help

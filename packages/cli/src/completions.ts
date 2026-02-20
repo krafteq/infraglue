@@ -5,7 +5,7 @@ _ig_completions() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  commands="apply destroy config env provider completion"
+  commands="apply destroy config env provider completion install-skill"
 
   case "\${prev}" in
     ig)
@@ -47,6 +47,7 @@ _ig() {
     'env:Manage environments'
     'provider:Run provider CLI commands'
     'completion:Output shell completion script'
+    'install-skill:Install AI coding agent skill'
   )
 
   _arguments -C \\
@@ -110,6 +111,7 @@ complete -c ig -n '__fish_use_subcommand' -a config -d 'Manage configuration'
 complete -c ig -n '__fish_use_subcommand' -a env -d 'Manage environments'
 complete -c ig -n '__fish_use_subcommand' -a provider -d 'Run provider CLI commands'
 complete -c ig -n '__fish_use_subcommand' -a completion -d 'Output shell completion script'
+complete -c ig -n '__fish_use_subcommand' -a install-skill -d 'Install AI coding agent skill'
 
 # apply/destroy options
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s e -l env -d 'Environment name' -r
