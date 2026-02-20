@@ -1,6 +1,13 @@
 ---
 name: infraglue
-description: InfraGlue (ig) CLI tool for managing Infrastructure as Code monorepos with Terraform and Pulumi workspace orchestration
+description: >
+  InfraGlue (ig) — CLI tool for managing Infrastructure as Code (IaC) monorepos.
+  Orchestrates Terraform and Pulumi workspaces with dependency resolution, output injection,
+  environment management, drift detection, and state reconciliation.
+  Use this skill when working with ig.yaml configs, ig CLI commands, or multi-workspace
+  Terraform/Pulumi infrastructure projects.
+  Keywords: terraform, pulumi, infrastructure, IaC, monorepo, workspace, ig, infraglue,
+  drift, plan, apply, destroy, import, export, refresh, environment.
 user-invokable: false
 ---
 
@@ -161,6 +168,35 @@ ig completion fish > ~/.config/fish/completions/ig.fish
 ig install-skill                      # install into .claude/skills/infraglue/SKILL.md
 ig install-skill --force              # overwrite existing
 ```
+
+### Non-Interactive / CI / Agent Usage
+
+When running from CI, a coding agent, or any non-TTY environment, ig auto-detects the context and disables interactive prompts. **Always prefer non-interactive flags** to avoid hanging on confirmation prompts.
+
+```bash
+# Plan is always non-interactive — just check exit code
+ig plan --env dev --project myws        # exit code: 0 = no changes, 2 = changes found
+ig plan --env dev --detailed            # classify changes as metadata-only vs real
+
+# Apply with auto-approve (level index is 1-based)
+ig apply --env dev --approve 1          # auto-approve level 1 (no confirmation prompt)
+ig apply --env dev --approve 2          # auto-approve level 2
+ig destroy --env dev --approve 1        # auto-approve destroy
+
+# Drift detection with JSON output for programmatic consumption
+ig drift --env staging --json           # outputs DriftReport JSON to stdout
+
+# Config inspection
+ig config show --json                   # parsed monorepo config as JSON
+```
+
+**Key points for automation:**
+
+- `ig plan` and `ig drift` are read-only and fully non-interactive
+- `ig apply` / `ig destroy` require `--approve <level>` for non-interactive use. Without it, the command waits for confirmation and will not proceed
+- `--approve` is 1-indexed and applies to a single level. For multi-level monorepos, run the command once per level (e.g., `--approve 1`, then `--approve 2`)
+- When no TTY is detected (CI, piped output, agent subprocess), ig auto-selects the `no-tty-cli` integration which suppresses interactive prompts
+- Exit codes: `0` = success/no changes, `1` = error, `2` = changes detected (plan/drift)
 
 ### Global Options
 
