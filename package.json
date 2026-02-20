@@ -14,7 +14,7 @@
     "commit": "cz",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "cd packages/cli && pnpm build && changeset publish --provenance",
+    "release": "pnpm --filter @krafteq/infraglue build && changeset publish --provenance",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:all": "vitest run --config vitest.all.config.ts",
