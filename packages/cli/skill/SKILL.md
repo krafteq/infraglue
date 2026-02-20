@@ -193,8 +193,8 @@ ig config show --json                   # parsed monorepo config as JSON
 **Key points for automation:**
 
 - `ig plan` and `ig drift` are read-only and fully non-interactive
-- `ig apply` / `ig destroy` require `--approve <level>` for non-interactive use. Without it, the command waits for confirmation and will not proceed
-- `--approve` is 1-indexed and applies to a single level. For multi-level monorepos, run the command once per level (e.g., `--approve 1`, then `--approve 2`)
+- `ig apply` / `ig destroy` require `--approve <level>` to skip the confirmation prompt. Without it, the command waits for confirmation
+- `--approve` is 1-indexed and applies to a **single level only**. Multi-level monorepos require a separate invocation per level (e.g., `--approve 1`, then `--approve 2`). There is no way to approve all levels at once
 - When no TTY is detected (CI, piped output, agent subprocess), ig auto-selects the `no-tty-cli` integration which suppresses interactive prompts
 - Exit codes: `0` = success/no changes, `1` = error, `2` = changes detected (plan/drift)
 
