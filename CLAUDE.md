@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 InfraGlue (`ig`) is a CLI tool for managing Infrastructure as Code monorepos. It orchestrates multiple Terraform/Pulumi workspaces by resolving dependencies, managing environments, and injecting outputs between workspaces. The main package is `@krafteq/infraglue` in `packages/cli/`.
 
+## Feature Requests
+
+Feature requests are stored in `.feature-requests/` directory (e.g., `.feature-requests/fr-001-plan-command.md`).
+
 ## Common Commands
 
 ```bash
