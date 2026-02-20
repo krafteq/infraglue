@@ -490,8 +490,8 @@ describe('MultistageExecutor', () => {
     })
   })
 
-  describe('non-interactive', () => {
-    it('should auto-apply when --approve matches level index', async () => {
+  describe('--approve flag', () => {
+    it('should auto-apply when --approve matches level index (non-interactive)', async () => {
       envSelected()
       const ws1 = createWs('ws1')
       const monorepo = new Monorepo('/root', [ws1], [], undefined)
@@ -506,10 +506,30 @@ describe('MultistageExecutor', () => {
       const integration = createNonInteractiveIntegration()
       await executor.exec({ formatter: createFormatter(), integration, approve: 1 })
 
+      expect(integration.askForConfirmation).not.toHaveBeenCalled()
       expect(mockApply).toHaveBeenCalledOnce()
     })
 
-    it('should stop and return when no --approve for current level', async () => {
+    it('should auto-apply when --approve matches level index (interactive)', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockApply.mockResolvedValue({})
+
+      const integration = createInteractiveIntegration()
+      await executor.exec({ formatter: createFormatter(), integration, approve: 1 })
+
+      expect(integration.askForConfirmation).not.toHaveBeenCalled()
+      expect(mockApply).toHaveBeenCalledOnce()
+    })
+
+    it('should stop and return when no --approve for current level (non-interactive)', async () => {
       envSelected()
       const ws1 = createWs('ws1')
       const monorepo = new Monorepo('/root', [ws1], [], undefined)

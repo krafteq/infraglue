@@ -195,21 +195,22 @@ export class MultistageExecutor {
         continue
       }
 
-      this.logPlanSummary(levelIndex, levelPlans, opts.formatter)
-
-      let message = levelPlans
-        .map(({ workspace, inputs, plan }) => {
-          const formatted = opts.formatter.format(plan)
-          return `🏭 Workspace: ${workspace.name}\nInputs:\n${JSON.stringify(inputs, null, 2)}\nPlan:\n${formatted}`
-        })
-        .join('\n--------------------------------\n')
-
-      message += '\n--------------------------------\n'
-      message += `Apply all workspaces in Level ${levelIndex + 1}?`
-
-      if (!opts.integration.interactive && opts.approve === levelIndex + 1) {
+      if (opts.approve === levelIndex + 1) {
+        this.logPlanSummary(levelIndex, levelPlans, opts.formatter)
         logger.info(`Level ${levelIndex + 1} approved, applying...`)
       } else {
+        this.logPlanSummary(levelIndex, levelPlans, opts.formatter, { skipFormattedPlan: true })
+
+        let message = levelPlans
+          .map(({ workspace, inputs, plan }) => {
+            const formatted = opts.formatter.format(plan)
+            return `🏭 Workspace: ${workspace.name}\nInputs:\n${JSON.stringify(inputs, null, 2)}\nPlan:\n${formatted}`
+          })
+          .join('\n--------------------------------\n')
+
+        message += '\n--------------------------------\n'
+        message += `Apply all workspaces in Level ${levelIndex + 1}?`
+
         const answer = await opts.integration.askForConfirmation(message)
 
         if (!opts.integration.interactive) {
