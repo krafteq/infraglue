@@ -71,6 +71,22 @@ export class WorkspaceInterop {
     return this.provider.existsInFolder(folderPath)
   }
 
+  public getDriftPlan(input: ProviderInput): Promise<ProviderPlan> {
+    return this.provider.getDriftPlan(this.providerConfig(), input, this.env)
+  }
+
+  public refresh(input: ProviderInput): Promise<void> {
+    return this.provider.refresh(this.providerConfig(), input, this.env)
+  }
+
+  public importResource(args: string[], input: ProviderInput): Promise<string> {
+    return this.provider.importResource(this.providerConfig(), args, input, this.env)
+  }
+
+  public generateCode(args: string[], input: ProviderInput): Promise<string> {
+    return this.provider.generateCode(this.providerConfig(), args, input, this.env)
+  }
+
   public execAnyCommand(command: string[], input: () => Promise<ProviderInput>): Promise<void> {
     return this.provider.execAnyCommand(command, this.providerConfig(), input, this.env)
   }

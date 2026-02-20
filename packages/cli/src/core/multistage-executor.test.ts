@@ -1,5 +1,10 @@
 import { vi } from 'vitest'
-import { MultistageExecutor, type IExecOptions, type IPlanExecOptions } from './multistage-executor.js'
+import {
+  MultistageExecutor,
+  type IExecOptions,
+  type IPlanExecOptions,
+  type IDriftOptions,
+} from './multistage-executor.js'
 import { ExecutionContext, Monorepo, Workspace, AppliedWorkspace } from './model.js'
 import { MockProvider, createProviderPlan } from '../__test-utils__/mock-provider.js'
 import { State } from './state-manager.js'
@@ -29,6 +34,10 @@ const mockGetOutputs = vi.fn()
 const mockDestroyPlan = vi.fn()
 const mockDestroy = vi.fn()
 const mockIsDestroyed = vi.fn()
+const mockGetDriftPlan = vi.fn()
+const mockRefresh = vi.fn()
+const mockImportResource = vi.fn()
+const mockGenerateCode = vi.fn()
 
 vi.mock('./workspace-interop.js', () => ({
   WorkspaceInterop: vi.fn().mockImplementation(() => ({
@@ -38,6 +47,10 @@ vi.mock('./workspace-interop.js', () => ({
     destroyPlan: mockDestroyPlan,
     destroy: mockDestroy,
     isDestroyed: mockIsDestroyed,
+    getDriftPlan: mockGetDriftPlan,
+    refresh: mockRefresh,
+    importResource: mockImportResource,
+    generateCode: mockGenerateCode,
   })),
 }))
 
@@ -497,6 +510,203 @@ describe('MultistageExecutor', () => {
       // askForConfirmation should be called, but apply should not
       expect(integration.askForConfirmation).toHaveBeenCalled()
       expect(mockApply).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('drift', () => {
+    it('should return hasDrift: false when no workspaces have drift', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetOutputs.mockResolvedValue({ outputs: { existing: 'value' }, actual: true })
+
+      const result = await executor.drift({ formatter: createFormatter() })
+
+      expect(result.hasDrift).toBe(false)
+      expect(result.report.hasDrift).toBe(false)
+      expect(result.report.workspaces).toHaveLength(1)
+      expect(result.report.workspaces[0].hasDrift).toBe(false)
+    })
+
+    it('should return hasDrift: true when drift is detected', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetDriftPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 0, change: 1, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      const result = await executor.drift({ formatter: createFormatter() })
+
+      expect(result.hasDrift).toBe(true)
+      expect(result.report.workspaces[0].hasDrift).toBe(true)
+    })
+
+    it('should collect drift reports across multiple levels', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      let callCount = 0
+      mockGetDriftPlan.mockImplementation(async () => {
+        callCount++
+        if (callCount === 1) {
+          // ws1 has no drift
+          return createProviderPlan()
+        }
+        // ws2 has drift
+        return createProviderPlan({
+          changeSummary: { add: 0, change: 1, remove: 0, replace: 0, outputUpdates: 0 },
+        })
+      })
+      mockGetOutputs.mockResolvedValue({ outputs: { key: 'val' }, actual: true })
+
+      const result = await executor.drift({ formatter: createFormatter() })
+
+      expect(result.hasDrift).toBe(true)
+      expect(result.report.workspaces).toHaveLength(2)
+      expect(result.report.workspaces[0].hasDrift).toBe(false)
+      expect(result.report.workspaces[1].hasDrift).toBe(true)
+    })
+
+    it('should store outputs for no-drift workspaces for downstream injection', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetOutputs.mockResolvedValue({ outputs: { net: 'dev_net' }, actual: true })
+
+      await executor.drift({ formatter: createFormatter() })
+
+      expect(ctx.findAppliedOutput('ws1', 'net')).toBe('dev_net')
+    })
+
+    it('should work with --project filter', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, ws2, true, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetOutputs.mockResolvedValue({ outputs: {}, actual: true })
+
+      const result = await executor.drift({ formatter: createFormatter() })
+
+      expect(result.hasDrift).toBe(false)
+      expect(mockGetDriftPlan).toHaveBeenCalledTimes(1)
+    })
+
+    it('should validate env', async () => {
+      mockRead.mockResolvedValue(new State())
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      await expect(executor.drift({ formatter: createFormatter() })).rejects.toThrow(
+        'Cannot execute: environments across workspaces are in inconsistent state',
+      )
+    })
+
+    it('should populate report with environment and timestamp', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetDriftPlan.mockResolvedValue(createProviderPlan())
+      mockGetOutputs.mockResolvedValue({ outputs: {}, actual: true })
+
+      const result = await executor.drift({ formatter: createFormatter() })
+
+      expect(result.report.environment).toBe('dev')
+      expect(result.report.timestamp).toBeTruthy()
+    })
+  })
+
+  describe('refreshState', () => {
+    it('should refresh all workspaces in order', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockRefresh.mockResolvedValue(undefined)
+      mockGetOutputs.mockResolvedValue({ outputs: { key: 'refreshed' }, actual: true })
+
+      await executor.refreshState()
+
+      expect(mockRefresh).toHaveBeenCalledTimes(2)
+      expect(mockGetOutputs).toHaveBeenCalledTimes(2)
+    })
+
+    it('should collect outputs for downstream injection', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockRefresh.mockResolvedValue(undefined)
+      let callCount = 0
+      mockGetOutputs.mockImplementation(async () => {
+        callCount++
+        if (callCount === 1) return { outputs: { net: 'dev_net' }, actual: true }
+        return { outputs: { db: 'localhost' }, actual: true }
+      })
+
+      await executor.refreshState()
+
+      expect(ctx.findAppliedOutput('ws1', 'net')).toBe('dev_net')
+      expect(ctx.findAppliedOutput('ws2', 'db')).toBe('localhost')
+    })
+
+    it('should work with --project filter', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, ws2, true, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockRefresh.mockResolvedValue(undefined)
+      mockGetOutputs.mockResolvedValue({ outputs: {}, actual: true })
+
+      await executor.refreshState()
+
+      expect(mockRefresh).toHaveBeenCalledTimes(1)
+    })
+
+    it('should validate env', async () => {
+      mockRead.mockResolvedValue(new State())
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      await expect(executor.refreshState()).rejects.toThrow(
+        'Cannot execute: environments across workspaces are in inconsistent state',
+      )
     })
   })
 })

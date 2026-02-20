@@ -1,10 +1,13 @@
 import { parsePulumiPreviewOutput } from './pulumi-provider.js'
+import { hasChanges } from './provider-plan.js'
 import {
   PULUMI_PREVIEW_CREATE,
   PULUMI_PREVIEW_UPDATE,
   PULUMI_PREVIEW_MIXED,
   PULUMI_PREVIEW_NO_CHANGES,
   PULUMI_PREVIEW_WITH_OUTPUTS,
+  PULUMI_DRIFT_DETECTED,
+  PULUMI_DRIFT_NONE,
 } from '../__test-utils__/provider-fixtures.js'
 import { mkdtemp, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
@@ -125,6 +128,28 @@ describe('parsePulumiPreviewOutput', () => {
     const deleteChange = plan.resourceChanges.find((r) => r.actions[0] === 'delete')
     expect(deleteChange!.before).toEqual({ bucketName: 'my-old-bucket' })
     expect(deleteChange!.after).toBeNull()
+  })
+})
+
+describe('parsePulumiPreviewOutput — drift detection', () => {
+  it('should parse drift-detected output with resource changes', () => {
+    const plan = parsePulumiPreviewOutput(PULUMI_DRIFT_DETECTED, 'network')
+
+    expect(hasChanges(plan)).toBe(true)
+    expect(plan.changeSummary.change).toBe(1)
+    expect(plan.resourceChanges).toHaveLength(1)
+    expect(plan.resourceChanges[0]).toMatchObject({
+      actions: ['update'],
+      before: { name: 'app', image: 'node:18' },
+      after: { name: 'app', image: 'node:20' },
+    })
+  })
+
+  it('should parse no-drift output as no changes', () => {
+    const plan = parsePulumiPreviewOutput(PULUMI_DRIFT_NONE, 'network')
+
+    expect(hasChanges(plan)).toBe(false)
+    expect(plan.changeSummary).toMatchObject({ add: 0, change: 0, remove: 0, replace: 0 })
   })
 })
 

@@ -27,6 +27,18 @@ export class MockProvider implements IProvider {
   existsInFolder = vi.fn<IProvider['existsInFolder']>((): Promise<boolean> => {
     throw new Error('Method not implemented.')
   })
+  getDriftPlan = vi.fn<IProvider['getDriftPlan']>((): Promise<ProviderPlan> => {
+    throw new Error('Method not implemented.')
+  })
+  refresh = vi.fn<IProvider['refresh']>((): Promise<void> => {
+    throw new Error('Method not implemented.')
+  })
+  importResource = vi.fn<IProvider['importResource']>((): Promise<string> => {
+    throw new Error('Method not implemented.')
+  })
+  generateCode = vi.fn<IProvider['generateCode']>((): Promise<string> => {
+    throw new Error('Method not implemented.')
+  })
   execAnyCommand = vi.fn<IProvider['execAnyCommand']>((): Promise<void> => {
     throw new Error('Method not implemented.')
   })

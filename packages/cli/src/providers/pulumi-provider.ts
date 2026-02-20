@@ -153,6 +153,46 @@ class PulumiProvider implements IProvider {
     return options
   }
 
+  async getDriftPlan(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan> {
+    await this.setPulumiConfig(configuration, input, env)
+
+    const stdout = await this.execCommand(`pulumi refresh --preview-only --stack ${env} --json`, configuration, env)
+
+    return this.mapPulumiOutputToProviderPlan(stdout, basename(configuration.rootPath))
+  }
+
+  async refresh(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<void> {
+    await this.setPulumiConfig(configuration, input, env)
+
+    await this.execCommand(`pulumi refresh --yes --stack ${env}`, configuration, env)
+  }
+
+  async importResource(
+    configuration: ProviderConfig,
+    args: string[],
+    input: ProviderInput,
+    env: string,
+  ): Promise<string> {
+    await this.setPulumiConfig(configuration, input, env)
+
+    return await this.execCommand(`pulumi import ${args.join(' ')} --yes --stack ${env}`, configuration, env)
+  }
+
+  async generateCode(
+    configuration: ProviderConfig,
+    args: string[],
+    input: ProviderInput,
+    env: string,
+  ): Promise<string> {
+    await this.setPulumiConfig(configuration, input, env)
+
+    return await this.execCommand(
+      `pulumi import ${args.join(' ')} --generate-code --yes --stack ${env}`,
+      configuration,
+      env,
+    )
+  }
+
   async execAnyCommand(
     command: string[],
     configuration: ProviderConfig,

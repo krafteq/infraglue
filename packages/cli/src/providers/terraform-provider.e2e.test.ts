@@ -1,10 +1,13 @@
 import { parseTerraformPlanOutput } from './terraform-provider.js'
+import { hasChanges } from './provider-plan.js'
 import {
   TERRAFORM_PLAN_CREATE,
   TERRAFORM_PLAN_UPDATE,
   TERRAFORM_PLAN_NO_CHANGES,
   TERRAFORM_PLAN_WITH_OUTPUTS,
   TERRAFORM_PLAN_WITH_DIAGNOSTICS,
+  TERRAFORM_DRIFT_DETECTED,
+  TERRAFORM_DRIFT_NONE,
 } from '../__test-utils__/provider-fixtures.js'
 import { mkdtemp, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
@@ -132,6 +135,30 @@ describe('parseTerraformPlanOutput', () => {
     const plan = parseTerraformPlanOutput(output, 'proj')
     expect(plan.outputs[0].action).toBeUndefined()
     expect(plan.changeSummary.outputUpdates).toBe(0)
+  })
+})
+
+describe('parseTerraformPlanOutput — drift detection', () => {
+  it('should parse drift-detected output with resource changes', () => {
+    const plan = parseTerraformPlanOutput(TERRAFORM_DRIFT_DETECTED, 'my-project')
+
+    expect(hasChanges(plan)).toBe(true)
+    expect(plan.changeSummary.change).toBe(1)
+    expect(plan.resourceChanges).toHaveLength(1)
+    expect(plan.resourceChanges[0]).toMatchObject({
+      address: 'docker_container.app',
+      actions: ['update'],
+      before: { image: 'node:18', name: 'app' },
+      after: { image: 'node:20', name: 'app' },
+    })
+  })
+
+  it('should parse no-drift output as no changes', () => {
+    const plan = parseTerraformPlanOutput(TERRAFORM_DRIFT_NONE, 'my-project')
+
+    expect(hasChanges(plan)).toBe(false)
+    expect(plan.resourceChanges).toHaveLength(0)
+    expect(plan.changeSummary).toMatchObject({ add: 0, change: 0, remove: 0, replace: 0 })
   })
 })
 

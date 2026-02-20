@@ -217,6 +217,117 @@ program
   })
 
 program
+  .command('drift')
+  .description('Detect infrastructure drift without modifying state')
+  .option('-f, --format <format>', 'Select formatter for the plan', 'default')
+  .option('-p, --project <project>', 'Project to check')
+  .option('-e, --env <env>', 'Environment to check')
+  .option('--no-deps', 'Ignore dependencies')
+  .option('-j, --json', 'Output drift report as JSON')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ ig drift --env staging
+  $ ig drift --env production --project postgres
+  $ ig drift --env dev --json`,
+  )
+  .action(
+    async ({
+      format,
+      env,
+      project,
+      deps,
+      json,
+    }: {
+      format?: string
+      env: string
+      project?: string
+      deps: boolean
+      json?: boolean
+    }) => {
+      const monorepo = requireMonorepo()
+      env = await resolveEnv(env)
+      const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, false, env)
+      const result = await new MultistageExecutor(execContext).drift({
+        formatter: getFormatter(format),
+        json: json ?? false,
+      })
+      if (json) {
+        process.stdout.write(JSON.stringify(result.report, null, 2) + '\n')
+      }
+      process.exitCode = result.hasDrift ? 2 : 0
+    },
+  )
+
+program
+  .command('refresh')
+  .description('Refresh infrastructure state from cloud providers')
+  .option('-f, --format <format>', 'Select formatter for the plan', 'default')
+  .option('-p, --project <project>', 'Project to refresh')
+  .option('-e, --env <env>', 'Environment to refresh')
+  .option('--no-deps', 'Ignore dependencies')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ ig refresh --env staging
+  $ ig refresh --env production --project postgres`,
+  )
+  .action(async ({ env, project, deps }: { format?: string; env: string; project?: string; deps: boolean }) => {
+    const monorepo = requireMonorepo()
+    env = await resolveEnv(env)
+    const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, false, env)
+    await new MultistageExecutor(execContext).refreshState()
+  })
+
+program
+  .command('import')
+  .description('Import an existing cloud resource into infrastructure state')
+  .argument('<args...>', 'Arguments to pass to the provider import command')
+  .requiredOption('-p, --project <project>', 'Project to import into')
+  .requiredOption('-e, --env <env>', 'Environment to use')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ ig import aws_instance.web i-1234567890abcdef0 --project webserver --env staging
+  $ ig import 'aws:ec2/instance:Instance' web i-1234567890abcdef0 --project webserver --env staging`,
+  )
+  .action(async (args: string[], { env, project }: { env: string; project: string }) => {
+    const monorepo = requireMonorepo()
+    env = await resolveEnv(env)
+    const ws = requireCurrentWorkspace(project)
+    const execContext = new ExecutionContext(monorepo, ws, true, false, env)
+    const inputs = await execContext.getInputs(ws)
+    const stdout = await execContext.interop(ws).importResource(args, inputs)
+    logger.info(stdout)
+  })
+
+program
+  .command('export')
+  .description('Generate code for imported or existing cloud resources')
+  .argument('<args...>', 'Arguments to pass to the provider generate-code command')
+  .requiredOption('-p, --project <project>', 'Project to generate code for')
+  .requiredOption('-e, --env <env>', 'Environment to use')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ ig export aws_instance.web i-1234567890abcdef0 --project webserver --env staging
+  $ ig export 'aws:ec2/instance:Instance' web i-1234567890abcdef0 --project webserver --env staging`,
+  )
+  .action(async (args: string[], { env, project }: { env: string; project: string }) => {
+    const monorepo = requireMonorepo()
+    env = await resolveEnv(env)
+    const ws = requireCurrentWorkspace(project)
+    const execContext = new ExecutionContext(monorepo, ws, true, false, env)
+    const inputs = await execContext.getInputs(ws)
+    const code = await execContext.interop(ws).generateCode(args, inputs)
+    process.stdout.write(code)
+  })
+
+program
   .command('completion')
   .description('Output shell completion script')
   .argument('<shell>', 'Shell type: bash, zsh, or fish')

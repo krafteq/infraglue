@@ -240,6 +240,113 @@ export class MultistageExecutor {
       }
     }
   }
+
+  public async drift(opts: IDriftOptions): Promise<DriftResult> {
+    await this.validateEnv()
+
+    const executionPlan = new ExecutionPlanBuilder(this.ctx).build()
+    logger.info(`\n Selected Environment: ${this.ctx.env}`)
+
+    const workspaceReports: WorkspaceDriftReport[] = []
+    let hasDrift = false
+
+    for (let levelIndex = 0; levelIndex < executionPlan.levelsCount; levelIndex++) {
+      const level = executionPlan.levels[levelIndex]
+
+      logger.info(`\n🔧 Checking Level ${levelIndex + 1}/${executionPlan.levelsCount}`)
+      logger.info('=====================================')
+
+      for (const workspace of level.workspaces) {
+        const inputs: ProviderInput = await this.ctx.getInputs(workspace)
+        const interop = this.ctx.interop(workspace)
+
+        const plan = await interop.getDriftPlan(inputs)
+        const wsDrift = hasChanges(plan)
+
+        workspaceReports.push({
+          name: workspace.name,
+          provider: workspace.providerName,
+          hasDrift: wsDrift,
+          plan,
+        })
+
+        if (wsDrift) {
+          hasDrift = true
+          logger.info(`⚠️  ${workspace.name} has drift`)
+          if (!opts.json) {
+            const formatted = opts.formatter.format(plan)
+            logger.info(`Plan:\n${formatted}`)
+          }
+        } else {
+          logger.info(`✅ ${workspace.name} is in sync`)
+          const { outputs } = await interop.getOutputs({ stale: this.ctx.ignoreDependencies })
+          this.ctx.storeWorkspaceOutputs(workspace, outputs)
+        }
+      }
+    }
+
+    const report: DriftReport = {
+      environment: this.ctx.env,
+      timestamp: new Date().toISOString(),
+      hasDrift,
+      workspaces: workspaceReports,
+    }
+
+    return { hasDrift, report }
+  }
+
+  public async refreshState(): Promise<void> {
+    await this.validateEnv()
+
+    const executionPlan = new ExecutionPlanBuilder(this.ctx).build()
+    logger.info(`\n Selected Environment: ${this.ctx.env}`)
+
+    for (let levelIndex = 0; levelIndex < executionPlan.levelsCount; levelIndex++) {
+      const level = executionPlan.levels[levelIndex]
+
+      logger.info(`\n🔧 Refreshing Level ${levelIndex + 1}/${executionPlan.levelsCount}`)
+      logger.info('=====================================')
+
+      for (const workspace of level.workspaces) {
+        const inputs: ProviderInput = await this.ctx.getInputs(workspace)
+        const interop = this.ctx.interop(workspace)
+
+        logger.info(`   Refreshing ${workspace.name}...`)
+        await interop.refresh(inputs)
+
+        const { outputs } = await interop.getOutputs()
+        this.ctx.storeWorkspaceOutputs(workspace, outputs)
+        logger.info(`   ✅ ${workspace.name} refreshed`)
+      }
+    }
+
+    logger.info('\n--------------------------------')
+    logger.info('🎉 State refresh completed')
+  }
+}
+
+export interface IDriftOptions {
+  formatter: IFormatter
+  json?: boolean
+}
+
+export interface DriftReport {
+  environment: string
+  timestamp: string
+  hasDrift: boolean
+  workspaces: WorkspaceDriftReport[]
+}
+
+export interface WorkspaceDriftReport {
+  name: string
+  provider: string
+  hasDrift: boolean
+  plan: ProviderPlan
+}
+
+export interface DriftResult {
+  hasDrift: boolean
+  report: DriftReport
 }
 
 function zero(): ChangeSummary {

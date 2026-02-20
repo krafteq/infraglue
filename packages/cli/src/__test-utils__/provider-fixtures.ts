@@ -150,3 +150,41 @@ export const PULUMI_STACK_OUTPUT_JSON = JSON.stringify({
   network_name: 'dev-network',
   db_host: 'localhost:5432',
 })
+
+// Drift detection fixtures
+// terraform plan -refresh-only --json output format is identical to regular plan output
+
+export const TERRAFORM_DRIFT_DETECTED = [
+  '{"@level":"info","type":"planned_change","change":{"resource":{"addr":"docker_container.app","module":"","resource":"docker_container.app","resource_type":"docker_container","resource_name":"app","resource_key":null},"action":"update","before":{"image":"node:18","name":"app"},"after":{"image":"node:20","name":"app"}}}',
+  '{"@level":"info","@message":"Plan: 0 to add, 1 to change, 0 to destroy.","type":"change_summary","changes":{"add":0,"change":1,"import":0,"remove":0,"operation":"plan"}}',
+].join('\n')
+
+export const TERRAFORM_DRIFT_NONE = [
+  '{"@level":"info","@message":"No changes. Infrastructure is up-to-date.","type":"change_summary","changes":{"add":0,"change":0,"import":0,"remove":0,"operation":"plan"}}',
+].join('\n')
+
+// pulumi refresh --preview-only --json output format is identical to preview --json output
+// (same steps array with op, urn, oldState, newState)
+
+export const PULUMI_DRIFT_DETECTED = JSON.stringify({
+  steps: [
+    {
+      op: 'update',
+      urn: 'urn:pulumi:dev::network::docker:index/container:Container::app-container',
+      oldState: { inputs: { name: 'app', image: 'node:18' } },
+      newState: { inputs: { name: 'app', image: 'node:20' } },
+      detailedDiff: { image: { kind: 'UPDATE' } },
+    },
+  ],
+})
+
+export const PULUMI_DRIFT_NONE = JSON.stringify({
+  steps: [
+    {
+      op: 'same',
+      urn: 'urn:pulumi:dev::myproject::pulumi:pulumi:Stack::myproject-dev',
+      oldState: { inputs: {} },
+      newState: { inputs: {} },
+    },
+  ],
+})

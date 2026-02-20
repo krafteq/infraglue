@@ -1,7 +1,7 @@
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { basename, extname, join } from 'path'
-import { readdir, copyFile, rm, access, constants, writeFile } from 'fs/promises'
+import { readdir, readFile, copyFile, rm, access, constants, writeFile } from 'fs/promises'
 import type { IProvider, ProviderConfig } from './provider.js'
 import type { ProviderInput, ProviderOutput } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provider-plan.js'
@@ -148,6 +148,50 @@ class TerraformProvider implements IProvider {
     )
     const filesStr = var_files?.map((f: string) => `-var-file=${f}`)?.join(' ') || ''
     return `${filesStr} -var-file=${tempVarFile}`
+  }
+
+  async getDriftPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
+    const variables = await this.getVariableString(configuration, input, environment)
+
+    const stdout = await this.execCommand(`terraform plan -refresh-only --json ${variables}`, configuration)
+
+    return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
+  }
+
+  async refresh(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<void> {
+    const variables = await this.getVariableString(configuration, input, environment)
+
+    await this.execCommand(`terraform apply -refresh-only -auto-approve --json ${variables}`, configuration)
+  }
+
+  async importResource(
+    configuration: ProviderConfig,
+    args: string[],
+    input: ProviderInput,
+    environment: string,
+  ): Promise<string> {
+    const variables = await this.getVariableString(configuration, input, environment)
+
+    return await this.execCommand(`terraform import ${variables} ${args.join(' ')}`, configuration)
+  }
+
+  async generateCode(
+    configuration: ProviderConfig,
+    args: string[],
+    input: ProviderInput,
+    environment: string,
+  ): Promise<string> {
+    const variables = await this.getVariableString(configuration, input, environment)
+    const stateManager = new StateManager(configuration.rootMonoRepoFolder)
+    const tempFile = await stateManager.storeWorkspaceTempFile(configuration.rootPath, 'generated.tf', '')
+
+    await this.execCommand(
+      `terraform plan -generate-config-out=${tempFile} --json ${variables} ${args.join(' ')}`,
+      configuration,
+    )
+
+    const generatedPath = join(configuration.rootPath, tempFile)
+    return await readFile(generatedPath, 'utf-8')
   }
 
   async execAnyCommand(

@@ -43,6 +43,11 @@ export interface IProvider {
 
   existsInFolder(folderPath: string): Promise<boolean>
 
+  getDriftPlan(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan>
+  refresh(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<void>
+  importResource(configuration: ProviderConfig, args: string[], input: ProviderInput, env: string): Promise<string>
+  generateCode(configuration: ProviderConfig, args: string[], input: ProviderInput, env: string): Promise<string>
+
   execAnyCommand(
     command: string[],
     configuration: ProviderConfig,
