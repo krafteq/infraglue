@@ -79,7 +79,12 @@ export class MultistageExecutor {
     return levelPlans
   }
 
-  private logPlanSummary(levelIndex: number, levelPlans: LevelPlanEntry[], formatter: IFormatter) {
+  private logPlanSummary(
+    levelIndex: number,
+    levelPlans: LevelPlanEntry[],
+    formatter: IFormatter,
+    options?: { skipFormattedPlan?: boolean },
+  ) {
     // TODO: it should probably be part of the formatter as well.
     logger.info('--------------------------------')
     logger.info(`📋 Level ${levelIndex + 1} Plan Summary:`)
@@ -94,11 +99,13 @@ export class MultistageExecutor {
 
     logger.info(`\n📊 Total Changes: ${dump(totalChanges)}`)
 
-    for (const { workspace, inputs, plan } of levelPlans) {
-      const formatted = formatter.format(plan)
-      logger.info(`\n🏭 Workspace: ${workspace.name}`)
-      logger.info(`Inputs:\n${JSON.stringify(inputs, null, 2)}`)
-      logger.info(`Plan:\n${formatted}`)
+    if (!options?.skipFormattedPlan) {
+      for (const { workspace, inputs, plan } of levelPlans) {
+        const formatted = formatter.format(plan)
+        logger.info(`\n🏭 Workspace: ${workspace.name}`)
+        logger.info(`Inputs:\n${JSON.stringify(inputs, null, 2)}`)
+        logger.info(`Plan:\n${formatted}`)
+      }
     }
   }
 
@@ -124,7 +131,12 @@ export class MultistageExecutor {
       }
 
       hasAnyChanges = true
-      this.logPlanSummary(levelIndex, levelPlans, opts.formatter)
+      this.logPlanSummary(
+        levelIndex,
+        levelPlans,
+        opts.formatter,
+        opts.detailed ? { skipFormattedPlan: true } : undefined,
+      )
 
       if (opts.detailed) {
         for (const { workspace, plan } of levelPlans) {
