@@ -17,8 +17,26 @@ class TerraformProvider implements IProvider {
     return 'terraform'
   }
 
-  async getPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
+  async getPlan(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    environment: string,
+    options?: { detailed?: boolean },
+  ): Promise<ProviderPlan> {
     const variables = await this.getVariableString(configuration, input, environment)
+
+    if (options?.detailed) {
+      const stateManager = new StateManager(configuration.rootMonoRepoFolder)
+      const planFile = await stateManager.storeWorkspaceTempFile(configuration.rootPath, 'ig-plan.bin', '')
+
+      const stdout = await this.execCommand(`terraform plan -out=${planFile} --json ${variables}`, configuration)
+      const plan = this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
+
+      const showOutput = await this.execCommand(`terraform show -json ${planFile}`, configuration)
+      await rm(join(configuration.rootPath, planFile)).catch(() => {})
+
+      return enrichPlanWithShowOutput(plan, showOutput)
+    }
 
     const stdout = await this.execCommand(`terraform plan --json ${variables}`, configuration)
 
@@ -349,4 +367,29 @@ export function parseTerraformPlanOutput(terraformOutput: string, projectName: s
     changeSummary,
     metadata: { rawOutput: terraformOutput },
   }
+}
+
+export function enrichPlanWithShowOutput(plan: ProviderPlan, showOutput: string): ProviderPlan {
+  const showData = JSON.parse(showOutput)
+  const detailsByAddress = new Map<
+    string,
+    { before: Record<string, unknown> | null; after: Record<string, unknown> | null }
+  >()
+
+  for (const rc of showData.resource_changes ?? []) {
+    detailsByAddress.set(rc.address, {
+      before: rc.change?.before ?? null,
+      after: rc.change?.after ?? null,
+    })
+  }
+
+  const enrichedChanges = plan.resourceChanges.map((rc) => {
+    const detail = detailsByAddress.get(rc.address)
+    if (detail) {
+      return { ...rc, before: detail.before, after: detail.after }
+    }
+    return rc
+  })
+
+  return { ...plan, resourceChanges: enrichedChanges }
 }

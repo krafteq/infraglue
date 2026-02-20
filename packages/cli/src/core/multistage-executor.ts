@@ -40,7 +40,7 @@ export class MultistageExecutor {
     }
   }
 
-  private async gatherLevelPlans(workspaces: Workspace[]): Promise<LevelPlanEntry[]> {
+  private async gatherLevelPlans(workspaces: Workspace[], options?: { detailed?: boolean }): Promise<LevelPlanEntry[]> {
     const levelPlans: LevelPlanEntry[] = []
 
     for (const workspace of workspaces) {
@@ -61,7 +61,7 @@ export class MultistageExecutor {
           continue
         }
       } else {
-        plan = await interop.getPlan(inputs)
+        plan = await interop.getPlan(inputs, options)
         if (!hasChanges(plan)) {
           const { outputs } = await interop.getOutputs({ stale: this.ctx.ignoreDependencies })
           logger.info(`✅ ${workspace.name} is up to date.`)
@@ -116,7 +116,7 @@ export class MultistageExecutor {
       logger.info(`\n🔧 Processing Level ${levelIndex + 1}/${executionPlan.levelsCount}`)
       logger.info('=====================================')
 
-      const levelPlans = await this.gatherLevelPlans(level.workspaces)
+      const levelPlans = await this.gatherLevelPlans(level.workspaces, opts.detailed ? { detailed: true } : undefined)
 
       if (levelPlans.length === 0) {
         logger.info('✅ No changes needed in this level')
@@ -129,18 +129,33 @@ export class MultistageExecutor {
       if (opts.detailed) {
         for (const { workspace, plan } of levelPlans) {
           const diff = computeDetailedDiff(plan.resourceChanges)
+          logger.info(
+            `\n🔍 ${workspace.name}: ${diff.metadataOnlyCount} metadata-only, ${diff.realChangeCount} real changes`,
+          )
+
           if (diff.metadataOnlyCount > 0) {
-            logger.info(`\n🔍 ${workspace.name}: ${diff.metadataOnlyCount} metadata-only, ${diff.realChangeCount} real`)
-          }
-          for (const resource of diff.resources) {
-            if (resource.isMetadataOnly) {
-              logger.info(`   ⚪ ${resource.address} (metadata-only, no attribute changes)`)
-            } else if (resource.attributeDiffs.length > 0) {
-              logger.info(`   🔶 ${resource.address}`)
-              for (const attr of resource.attributeDiffs) {
-                logger.info(`      ${attr.key}: ${JSON.stringify(attr.before)} → ${JSON.stringify(attr.after)}`)
+            logger.info(`\n   metadata-only (${diff.metadataOnlyCount}):`)
+            for (const resource of diff.resources) {
+              if (resource.isMetadataOnly) {
+                logger.info(`      ${resource.address}`)
               }
             }
+          }
+
+          if (diff.realChangeCount > 0) {
+            logger.info(`\n   real changes (${diff.realChangeCount}):`)
+            for (const resource of diff.resources) {
+              if (!resource.isMetadataOnly && resource.attributeDiffs.length > 0) {
+                logger.info(`      ${resource.address}`)
+                for (const attr of resource.attributeDiffs) {
+                  logger.info(`         ${attr.key}: ${JSON.stringify(attr.before)} → ${JSON.stringify(attr.after)}`)
+                }
+              } else if (!resource.isMetadataOnly) {
+                logger.info(`      ${resource.address} [${resource.actions.join(', ')}]`)
+              }
+            }
+          } else {
+            logger.info(`\n   real changes (0): (none)`)
           }
         }
       }

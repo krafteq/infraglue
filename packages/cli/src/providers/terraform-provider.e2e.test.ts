@@ -1,4 +1,4 @@
-import { parseTerraformPlanOutput } from './terraform-provider.js'
+import { parseTerraformPlanOutput, enrichPlanWithShowOutput } from './terraform-provider.js'
 import { hasChanges } from './provider-plan.js'
 import {
   TERRAFORM_PLAN_CREATE,
@@ -8,6 +8,8 @@ import {
   TERRAFORM_PLAN_WITH_DIAGNOSTICS,
   TERRAFORM_DRIFT_DETECTED,
   TERRAFORM_DRIFT_NONE,
+  TERRAFORM_PLAN_MIXED_CHANGES,
+  TERRAFORM_SHOW_JSON_MIXED,
 } from '../__test-utils__/provider-fixtures.js'
 import { mkdtemp, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
@@ -200,5 +202,42 @@ describe('TerraformProvider.existsInFolder', () => {
 
   it('should return false for non-existent folder', async () => {
     expect(await terraformProvider.existsInFolder('/tmp/non-existent-folder-xyz')).toBe(false)
+  })
+})
+
+describe('enrichPlanWithShowOutput', () => {
+  it('should merge before/after from show output into plan resource changes', () => {
+    const plan = parseTerraformPlanOutput(TERRAFORM_PLAN_MIXED_CHANGES, 'proj')
+    // Streaming format may not have real before/after — enrichment provides them
+    const enriched = enrichPlanWithShowOutput(plan, TERRAFORM_SHOW_JSON_MIXED)
+
+    const app = enriched.resourceChanges.find((rc) => rc.address === 'docker_container.app')!
+    expect(app.before).toEqual({ image: 'node:18', name: 'app', ports: [{ internal: 3000, external: 3000 }] })
+    expect(app.after).toEqual({ image: 'node:20', name: 'app', ports: [{ internal: 3000, external: 3000 }] })
+
+    const network = enriched.resourceChanges.find((rc) => rc.address === 'docker_network.main')!
+    expect(network.before).toEqual({ name: 'dev-network', driver: 'bridge' })
+    expect(network.after).toEqual({ name: 'dev-network', driver: 'bridge' })
+
+    const volume = enriched.resourceChanges.find((rc) => rc.address === 'docker_volume.data')!
+    expect(volume.before).toBeNull()
+    expect(volume.after).toEqual({ name: 'app-data' })
+  })
+
+  it('should preserve plan metadata (summary, outputs, diagnostics)', () => {
+    const plan = parseTerraformPlanOutput(TERRAFORM_PLAN_MIXED_CHANGES, 'proj')
+    const enriched = enrichPlanWithShowOutput(plan, TERRAFORM_SHOW_JSON_MIXED)
+
+    expect(enriched.changeSummary).toEqual(plan.changeSummary)
+    expect(enriched.provider).toBe('terraform')
+    expect(enriched.projectName).toBe('proj')
+  })
+
+  it('should handle empty resource_changes in show output', () => {
+    const plan = parseTerraformPlanOutput(TERRAFORM_PLAN_UPDATE, 'proj')
+    const enriched = enrichPlanWithShowOutput(plan, JSON.stringify({ resource_changes: [] }))
+
+    // No match found — original before/after preserved
+    expect(enriched.resourceChanges[0].before).toEqual(plan.resourceChanges[0].before)
   })
 })

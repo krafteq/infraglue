@@ -1,5 +1,5 @@
 import { computeDetailedDiff } from './plan-diff.js'
-import { parseTerraformPlanOutput } from '../providers/terraform-provider.js'
+import { parseTerraformPlanOutput, enrichPlanWithShowOutput } from '../providers/terraform-provider.js'
 import { parsePulumiPreviewOutput } from '../providers/pulumi-provider.js'
 import {
   TERRAFORM_PLAN_CREATE,
@@ -7,6 +7,7 @@ import {
   TERRAFORM_PLAN_METADATA_ONLY,
   TERRAFORM_PLAN_MIXED_CHANGES,
   TERRAFORM_PLAN_NO_CHANGES,
+  TERRAFORM_SHOW_JSON_MIXED,
   PULUMI_PREVIEW_CREATE,
   PULUMI_PREVIEW_UPDATE,
   PULUMI_PREVIEW_METADATA_ONLY,
@@ -73,6 +74,33 @@ describe('computeDetailedDiff with real Terraform output', () => {
     const network = diff.resources.find((r) => r.address === 'docker_network.main')!
     expect(network.isMetadataOnly).toBe(true)
     expect(network.attributeDiffs).toEqual([])
+
+    // docker_volume.data — create (before null)
+    const volume = diff.resources.find((r) => r.address === 'docker_volume.data')!
+    expect(volume.isMetadataOnly).toBe(false)
+    expect(volume.actions).toEqual(['create'])
+
+    expect(diff.realChangeCount).toBe(2)
+    expect(diff.metadataOnlyCount).toBe(1)
+  })
+})
+
+describe('computeDetailedDiff with enriched Terraform output (streaming + show)', () => {
+  it('should classify metadata-only vs real changes after enrichment', () => {
+    const plan = parseTerraformPlanOutput(TERRAFORM_PLAN_MIXED_CHANGES, 'proj')
+    const enriched = enrichPlanWithShowOutput(plan, TERRAFORM_SHOW_JSON_MIXED)
+    const diff = computeDetailedDiff(enriched.resourceChanges)
+
+    expect(diff.resources).toHaveLength(3)
+
+    // docker_container.app — real update (image changed from node:18 to node:20)
+    const app = diff.resources.find((r) => r.address === 'docker_container.app')!
+    expect(app.isMetadataOnly).toBe(false)
+    expect(app.attributeDiffs).toEqual([{ key: 'image', before: 'node:18', after: 'node:20' }])
+
+    // docker_network.main — metadata-only (identical before/after from show output)
+    const network = diff.resources.find((r) => r.address === 'docker_network.main')!
+    expect(network.isMetadataOnly).toBe(true)
 
     // docker_volume.data — create (before null)
     const volume = diff.resources.find((r) => r.address === 'docker_volume.data')!

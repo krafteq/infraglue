@@ -38,8 +38,8 @@ export class WorkspaceInterop {
     return { outputs, actual: true }
   }
 
-  public getPlan(input: ProviderInput): Promise<ProviderPlan> {
-    return this.provider.getPlan(this.providerConfig(), input, this.env)
+  public getPlan(input: ProviderInput, options?: { detailed?: boolean }): Promise<ProviderPlan> {
+    return this.provider.getPlan(this.providerConfig(), input, this.env, options)
   }
 
   public async apply(input: ProviderInput): Promise<ProviderOutput> {

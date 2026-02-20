@@ -30,7 +30,12 @@ export interface EnvironmentConfig {
 
 export interface IProvider {
   getProviderName(): string
-  getPlan(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan>
+  getPlan(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    env: string,
+    options?: { detailed?: boolean },
+  ): Promise<ProviderPlan>
   apply(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderOutput>
   getOutputs(configuration: ProviderConfig, env: string): Promise<ProviderOutput>
   // TODO: apply plan only

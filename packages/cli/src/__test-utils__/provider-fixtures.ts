@@ -40,6 +40,47 @@ export const TERRAFORM_PLAN_MIXED_CHANGES = [
   '{"@level":"info","@message":"Plan: 1 to add, 2 to change, 0 to destroy.","type":"change_summary","changes":{"add":1,"change":2,"import":0,"remove":0,"operation":"plan"}}',
 ].join('\n')
 
+// terraform show -json <planfile> format — single JSON object with before/after
+export const TERRAFORM_SHOW_JSON_MIXED = JSON.stringify({
+  format_version: '1.2',
+  terraform_version: '1.9.0',
+  resource_changes: [
+    {
+      address: 'docker_container.app',
+      mode: 'managed',
+      type: 'docker_container',
+      name: 'app',
+      change: {
+        actions: ['update'],
+        before: { image: 'node:18', name: 'app', ports: [{ internal: 3000, external: 3000 }] },
+        after: { image: 'node:20', name: 'app', ports: [{ internal: 3000, external: 3000 }] },
+      },
+    },
+    {
+      address: 'docker_network.main',
+      mode: 'managed',
+      type: 'docker_network',
+      name: 'main',
+      change: {
+        actions: ['update'],
+        before: { name: 'dev-network', driver: 'bridge' },
+        after: { name: 'dev-network', driver: 'bridge' },
+      },
+    },
+    {
+      address: 'docker_volume.data',
+      mode: 'managed',
+      type: 'docker_volume',
+      name: 'data',
+      change: {
+        actions: ['create'],
+        before: null,
+        after: { name: 'app-data' },
+      },
+    },
+  ],
+})
+
 export const TERRAFORM_OUTPUT_JSON = JSON.stringify({
   network_name: { value: 'dev-network', type: 'string', sensitive: false },
   db_host: { value: 'localhost:5432', type: 'string', sensitive: false },

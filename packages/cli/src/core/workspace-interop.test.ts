@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import { WorkspaceInterop } from './workspace-interop.js'
 import { Monorepo, Workspace } from './model.js'
-import { MockProvider } from '../__test-utils__/mock-provider.js'
+import { MockProvider, createProviderPlan } from '../__test-utils__/mock-provider.js'
 import { StateManager, State } from './state-manager.js'
 import type { ProviderPlan } from '../providers/provider-plan.js'
 
@@ -81,7 +81,18 @@ describe('WorkspaceInterop', () => {
       expect.objectContaining({ alias: 'ws1', rootPath: '/path/to/ws1' }),
       { key: 'value' },
       'dev',
+      undefined,
     )
+  })
+
+  it('should pass detailed option to provider getPlan', async () => {
+    const { provider, interop } = setup()
+    provider.getPlan.mockResolvedValue(createProviderPlan())
+
+    await interop.getPlan({ key: 'value' }, { detailed: true })
+    expect(provider.getPlan).toHaveBeenCalledWith(expect.objectContaining({ alias: 'ws1' }), { key: 'value' }, 'dev', {
+      detailed: true,
+    })
   })
 
   it('should delegate apply to provider and return outputs', async () => {
@@ -237,6 +248,7 @@ describe('WorkspaceInterop', () => {
       }),
       {},
       'dev',
+      undefined,
     )
   })
 })

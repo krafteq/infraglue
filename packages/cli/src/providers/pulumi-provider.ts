@@ -17,7 +17,12 @@ class PulumiProvider implements IProvider {
     return 'pulumi'
   }
 
-  async getPlan(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan> {
+  async getPlan(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    env: string,
+    _options?: { detailed?: boolean },
+  ): Promise<ProviderPlan> {
     await this.setPulumiConfig(configuration, input, env)
 
     const stdout = await this.execCommand(`pulumi preview --stack ${env} --json --diff`, configuration, env)
