@@ -140,6 +140,18 @@ export class State {
     this._env = stateFile?.current_environment
     this._nextEnv = stateFile?.next_environment
     this._workspaces = stateFile?.workspaces
+    // Migrate legacy string outputs → { value, secret } format
+    if (this._workspaces) {
+      for (const ws of Object.values(this._workspaces)) {
+        if (ws.outputs) {
+          for (const [key, val] of Object.entries(ws.outputs)) {
+            if (typeof val === 'string') {
+              ;(ws.outputs as Record<string, unknown>)[key] = { value: val, secret: false }
+            }
+          }
+        }
+      }
+    }
   }
 
   public serialize(): IState {

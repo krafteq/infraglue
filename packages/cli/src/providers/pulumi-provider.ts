@@ -2,7 +2,7 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 import { basename, join, resolve } from 'path'
 import { access, constants as fsConstants } from 'fs'
-import type { ProviderConfig, ProviderInput, ProviderOutput } from './provider.js'
+import type { ProviderConfig, ProviderInput, ProviderOutput, OutputValue } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary, ChangeAction } from './provider-plan.js'
 import type { IProvider } from './provider.js'
 import type { ExecOptions } from 'node:child_process'
@@ -35,25 +35,11 @@ class PulumiProvider implements IProvider {
 
     await this.execCommand(`pulumi up --yes --json`, configuration, env)
 
-    const outputStdout = await this.execCommand(`pulumi stack output --json --show-secrets`, configuration, env)
-
-    const outputs = JSON.parse(outputStdout) as Record<string, { value: unknown }>
-
-    return Object.fromEntries(
-      Object.entries(outputs).map(([key, value]) => [
-        key,
-        typeof value === 'string' ? value : JSON.stringify(value.value),
-      ]),
-    )
+    return this.getOutputsWithSecretDetection(configuration, env)
   }
 
   async getOutputs(configuration: ProviderConfig, env: string): Promise<ProviderOutput> {
-    const outputStdout = await this.execCommand(`pulumi stack output --json --show-secrets`, configuration, env)
-
-    const outputs = JSON.parse(outputStdout) as Record<string, unknown>
-    return Object.fromEntries(
-      Object.entries(outputs).map(([key, value]) => [key, typeof value === 'string' ? value : JSON.stringify(value)]),
-    )
+    return this.getOutputsWithSecretDetection(configuration, env)
   }
 
   async destroyPlan(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan> {
@@ -136,11 +122,43 @@ class PulumiProvider implements IProvider {
     }
   }
 
+  private async getOutputsWithSecretDetection(configuration: ProviderConfig, env: string): Promise<ProviderOutput> {
+    // First call without --show-secrets to detect which keys are secret
+    const publicStdout = await this.execCommand(`pulumi stack output --json`, configuration, env)
+    const publicOutputs = JSON.parse(publicStdout) as Record<string, unknown>
+    const secretKeys = new Set<string>()
+    for (const [key, value] of Object.entries(publicOutputs)) {
+      if (value === '[secret]') {
+        secretKeys.add(key)
+      }
+    }
+
+    // Second call with --show-secrets to get actual values
+    const secretStdout = await this.execCommand(`pulumi stack output --json --show-secrets`, configuration, env)
+    const fullOutputs = JSON.parse(secretStdout) as Record<string, unknown>
+
+    return Object.fromEntries(
+      Object.entries(fullOutputs).map(([key, value]) => [
+        key,
+        {
+          value: typeof value === 'string' ? value : JSON.stringify(value),
+          secret: secretKeys.has(key),
+        } satisfies OutputValue,
+      ]),
+    )
+  }
+
   private async setPulumiConfig(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<void> {
     const rootVars = configuration.rootVars ?? {}
     const envVars = configuration.envs?.[env]?.vars || {}
-    for (const [key, value] of Object.entries({ ...rootVars, ...envVars, ...input })) {
-      await this.execCommand(`pulumi config set ${key} ${value}`, configuration, env)
+    const allVars: ProviderInput = {
+      ...toNonSecretInput(rootVars),
+      ...toNonSecretInput(envVars),
+      ...input,
+    }
+    for (const [key, outputValue] of Object.entries(allVars)) {
+      const secretFlag = outputValue.secret ? ' --secret' : ''
+      await this.execCommand(`pulumi config set${secretFlag} ${key} ${outputValue.value}`, configuration, env)
     }
   }
 
@@ -238,6 +256,10 @@ class PulumiProvider implements IProvider {
       throw error
     }
   }
+}
+
+function toNonSecretInput(vars: Record<string, string>): ProviderInput {
+  return Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, { value: v, secret: false }]))
 }
 
 export const pulumiProvider = new PulumiProvider() as IProvider

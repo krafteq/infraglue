@@ -1,13 +1,7 @@
 import { type ExecutionContext, ExecutionPlanBuilder, Workspace } from './model.js'
 import { StateManager } from './state-manager.js'
 import { logger, UserError } from '../utils/index.js'
-import {
-  type ChangeSummary,
-  hasChanges,
-  type ProviderInput,
-  type ProviderOutput,
-  type ProviderPlan,
-} from '../providers/index.js'
+import { type ChangeSummary, hasChanges, type ProviderInput, type ProviderPlan } from '../providers/index.js'
 import type { IIntegration } from '../integrations/integration.js'
 import type { IFormatter } from '../formatters/formatter.js'
 import { computeDetailedDiff } from './plan-diff.js'
@@ -253,13 +247,13 @@ export class MultistageExecutor {
     } else {
       logger.info('🎉 Infrastructure applied successfully')
       if (!this.ctx.currentWorkspace) {
-        const result: ProviderOutput = {}
+        const result: Record<string, string> = {}
         for (const exp of this.ctx.monorepo.exports) {
-          const valueToOutput = exp.workspace ? this.ctx.findAppliedOutput(exp.workspace, exp.key) : 'TODO?'
-          if (valueToOutput === undefined) {
+          const outputValue = exp.workspace ? this.ctx.findAppliedOutput(exp.workspace, exp.key) : undefined
+          if (outputValue === undefined) {
             logger.warn(`Value to output ${exp.key} from workspace ${exp.workspace} is not found`)
           } else {
-            result[exp.name] = valueToOutput
+            result[exp.name] = outputValue.value
           }
         }
         logger.info('Outputs:')

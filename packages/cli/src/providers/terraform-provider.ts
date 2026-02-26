@@ -3,7 +3,7 @@ import { promisify } from 'util'
 import { basename, extname, join } from 'path'
 import { readdir, readFile, copyFile, rm, access, constants, writeFile } from 'fs/promises'
 import type { IProvider, ProviderConfig } from './provider.js'
-import type { ProviderInput, ProviderOutput } from './provider.js'
+import type { ProviderInput, ProviderOutput, OutputValue } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provider-plan.js'
 import { logger, UserError, ProviderError } from '../utils/index.js'
 import { StateManager } from '../core/index.js'
@@ -54,16 +54,13 @@ class TerraformProvider implements IProvider {
 
     const stdout = await this.execCommand(`terraform output --json`, configuration)
 
-    const outputs = JSON.parse(stdout) as Record<string, { value: string }>
-
-    return Object.fromEntries(Object.entries(outputs).map(([key, value]) => [key, value.value]))
+    return parseTerraformOutputJson(stdout)
   }
 
   async getOutputs(configuration: ProviderConfig): Promise<ProviderOutput> {
     const stdout = await this.execCommand(`terraform output --json`, configuration)
-    const outputs = JSON.parse(stdout) as Record<string, { value: string }>
 
-    return Object.fromEntries(Object.entries(outputs).map(([key, value]) => [key, value.value]))
+    return parseTerraformOutputJson(stdout)
   }
 
   async destroyPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
@@ -160,8 +157,13 @@ class TerraformProvider implements IProvider {
   private async getVariableString(configuration: ProviderConfig, input: ProviderInput, environment: string) {
     const { var_files, vars } = configuration.envs?.[environment] || { vars: {}, var_files: [] }
     const rootVars = configuration.rootVars ?? {}
-    const variables = Object.entries({ ...rootVars, ...vars, ...input })
-      .map(([key, value]) => `${key}="${value}"`)
+    const allVars: ProviderInput = {
+      ...toNonSecretInput(rootVars),
+      ...toNonSecretInput(vars ?? {}),
+      ...input,
+    }
+    const variables = Object.entries(allVars)
+      .map(([key, outputValue]) => `${key}="${outputValue.value}"`)
       .join('\n')
     const stateManager = new StateManager(configuration.rootMonoRepoFolder)
     const tempVarFile = await stateManager.storeWorkspaceTempFile(
@@ -281,6 +283,23 @@ class TerraformProvider implements IProvider {
       throw error
     }
   }
+}
+
+function toNonSecretInput(vars: Record<string, string>): ProviderInput {
+  return Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, { value: v, secret: false }]))
+}
+
+function parseTerraformOutputJson(stdout: string): ProviderOutput {
+  const outputs = JSON.parse(stdout) as Record<string, { value: unknown; sensitive?: boolean }>
+  return Object.fromEntries(
+    Object.entries(outputs).map(([key, output]) => [
+      key,
+      {
+        value: typeof output.value === 'string' ? output.value : JSON.stringify(output.value),
+        secret: output.sensitive ?? false,
+      } satisfies OutputValue,
+    ]),
+  )
 }
 
 export const terraformProvider = new TerraformProvider() as IProvider

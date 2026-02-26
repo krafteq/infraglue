@@ -103,13 +103,13 @@ describe('Monorepo', () => {
 describe('ExecutionContext', () => {
   const ws1 = createWorkspace('ws1')
   const ws2 = createWorkspace('ws2')
-  const appliedWs1 = new AppliedWorkspace('ws1', { out1: 'val1' })
+  const appliedWs1 = new AppliedWorkspace('ws1', { out1: { value: 'val1', secret: false } })
   const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
   const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
   ctx.storeWorkspaceOutputs(ws1, appliedWs1.outputValues)
 
   it('should find output from applied workspace', () => {
-    expect(ctx.findAppliedOutput('ws1', 'out1')).toBe('val1')
+    expect(ctx.findAppliedOutput('ws1', 'out1')).toEqual({ value: 'val1', secret: false })
     expect(ctx.findAppliedOutput('ws1', 'out2')).toBeUndefined()
     expect(ctx.findAppliedOutput('ws2', 'out1')).toBeUndefined()
   })
@@ -119,7 +119,7 @@ describe('ExecutionContext', () => {
       input1: { workspace: 'ws1', key: 'out1' },
     })
     const inputs = await ctx.getInputs(ws2WithInj)
-    expect(inputs).toEqual({ input1: 'val1' })
+    expect(inputs).toEqual({ input1: { value: 'val1', secret: false } })
   })
 
   it('should throw error if injection value not found', async () => {
@@ -132,14 +132,14 @@ describe('ExecutionContext', () => {
   })
 
   it('should store applied workspace', () => {
-    ctx.storeWorkspaceOutputs(ws2, { out2: 'val2' })
+    ctx.storeWorkspaceOutputs(ws2, { out2: { value: 'val2', secret: false } })
     expect(ctx.workspaceOutputs).toHaveLength(2)
-    expect(ctx.findAppliedOutput('ws2', 'out2')).toBe('val2')
+    expect(ctx.findAppliedOutput('ws2', 'out2')).toEqual({ value: 'val2', secret: false })
 
     // Update existing
-    ctx.storeWorkspaceOutputs(ws2, { out2: 'new-val2' })
+    ctx.storeWorkspaceOutputs(ws2, { out2: { value: 'new-val2', secret: false } })
     expect(ctx.workspaceOutputs).toHaveLength(2)
-    expect(ctx.findAppliedOutput('ws2', 'out2')).toBe('new-val2')
+    expect(ctx.findAppliedOutput('ws2', 'out2')).toEqual({ value: 'new-val2', secret: false })
   })
 
   it('should remove destroyed workspace', () => {

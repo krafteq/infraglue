@@ -77,11 +77,11 @@ describe('WorkspaceInterop', () => {
     }
     provider.getPlan.mockResolvedValue(mockPlan)
 
-    const result = await interop.getPlan({ key: 'value' })
+    const result = await interop.getPlan({ key: { value: 'value', secret: false } })
     expect(result).toBe(mockPlan)
     expect(provider.getPlan).toHaveBeenCalledWith(
       expect.objectContaining({ alias: 'ws1', rootPath: '/path/to/ws1' }),
-      { key: 'value' },
+      { key: { value: 'value', secret: false } },
       'dev',
       undefined,
     )
@@ -91,18 +91,23 @@ describe('WorkspaceInterop', () => {
     const { provider, interop } = setup()
     provider.getPlan.mockResolvedValue(createProviderPlan())
 
-    await interop.getPlan({ key: 'value' }, { detailed: true })
-    expect(provider.getPlan).toHaveBeenCalledWith(expect.objectContaining({ alias: 'ws1' }), { key: 'value' }, 'dev', {
-      detailed: true,
-    })
+    await interop.getPlan({ key: { value: 'value', secret: false } }, { detailed: true })
+    expect(provider.getPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ alias: 'ws1' }),
+      { key: { value: 'value', secret: false } },
+      'dev',
+      {
+        detailed: true,
+      },
+    )
   })
 
   it('should delegate apply to provider and return outputs', async () => {
     const { provider, interop } = setup()
-    provider.apply.mockResolvedValue({ url: 'http://localhost' })
+    provider.apply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
 
-    const result = await interop.apply({ input: 'val' })
-    expect(result).toEqual({ url: 'http://localhost' })
+    const result = await interop.apply({ input: { value: 'val', secret: false } })
+    expect(result).toEqual({ url: { value: 'http://localhost', secret: false } })
     expect(provider.apply).toHaveBeenCalledOnce()
   })
 
@@ -150,10 +155,10 @@ describe('WorkspaceInterop', () => {
 
   it('should fetch live outputs when stale not requested', async () => {
     const { provider, interop } = setup()
-    provider.getOutputs.mockResolvedValue({ key: 'live-value' })
+    provider.getOutputs.mockResolvedValue({ key: { value: 'live-value', secret: false } })
 
     const { outputs, actual } = await interop.getOutputs()
-    expect(outputs).toEqual({ key: 'live-value' })
+    expect(outputs).toEqual({ key: { value: 'live-value', secret: false } })
     expect(actual).toBe(true)
     expect(provider.getOutputs).toHaveBeenCalledOnce()
   })
@@ -162,7 +167,7 @@ describe('WorkspaceInterop', () => {
     const { provider, interop } = setup({ cachedOutputs: { key: 'cached-value' } })
 
     const { outputs, actual } = await interop.getOutputs({ stale: true })
-    expect(outputs).toEqual({ key: 'cached-value' })
+    expect(outputs).toEqual({ key: { value: 'cached-value', secret: false } })
     expect(actual).toBe(false)
     expect(provider.getOutputs).not.toHaveBeenCalled()
   })
@@ -181,11 +186,11 @@ describe('WorkspaceInterop', () => {
     }
     provider.getDriftPlan.mockResolvedValue(mockPlan)
 
-    const result = await interop.getDriftPlan({ key: 'value' })
+    const result = await interop.getDriftPlan({ key: { value: 'value', secret: false } })
     expect(result).toBe(mockPlan)
     expect(provider.getDriftPlan).toHaveBeenCalledWith(
       expect.objectContaining({ alias: 'ws1', rootPath: '/path/to/ws1' }),
-      { key: 'value' },
+      { key: { value: 'value', secret: false } },
       'dev',
     )
   })
@@ -194,20 +199,26 @@ describe('WorkspaceInterop', () => {
     const { provider, interop } = setup()
     provider.refresh.mockResolvedValue(undefined)
 
-    await interop.refresh({ key: 'value' })
-    expect(provider.refresh).toHaveBeenCalledWith(expect.objectContaining({ alias: 'ws1' }), { key: 'value' }, 'dev')
+    await interop.refresh({ key: { value: 'value', secret: false } })
+    expect(provider.refresh).toHaveBeenCalledWith(
+      expect.objectContaining({ alias: 'ws1' }),
+      { key: { value: 'value', secret: false } },
+      'dev',
+    )
   })
 
   it('should delegate importResource to provider', async () => {
     const { provider, interop } = setup()
     provider.importResource.mockResolvedValue('Import successful')
 
-    const result = await interop.importResource(['aws_instance.web', 'i-123'], { key: 'value' })
+    const result = await interop.importResource(['aws_instance.web', 'i-123'], {
+      key: { value: 'value', secret: false },
+    })
     expect(result).toBe('Import successful')
     expect(provider.importResource).toHaveBeenCalledWith(
       expect.objectContaining({ alias: 'ws1' }),
       ['aws_instance.web', 'i-123'],
-      { key: 'value' },
+      { key: { value: 'value', secret: false } },
       'dev',
     )
   })
@@ -216,38 +227,38 @@ describe('WorkspaceInterop', () => {
     const { provider, interop } = setup()
     provider.generateCode.mockResolvedValue('resource "aws_instance" "web" {}')
 
-    const result = await interop.generateCode(['aws_instance.web', 'i-123'], { key: 'value' })
+    const result = await interop.generateCode(['aws_instance.web', 'i-123'], { key: { value: 'value', secret: false } })
     expect(result).toBe('resource "aws_instance" "web" {}')
     expect(provider.generateCode).toHaveBeenCalledWith(
       expect.objectContaining({ alias: 'ws1' }),
       ['aws_instance.web', 'i-123'],
-      { key: 'value' },
+      { key: { value: 'value', secret: false } },
       'dev',
     )
   })
 
   it('should fetch live outputs when disableStateOutputs is true even with stale flag', async () => {
     const { provider, interop } = setup({ cachedOutputs: { key: 'cached-value' } })
-    provider.getOutputs.mockResolvedValue({ key: 'live-value' })
+    provider.getOutputs.mockResolvedValue({ key: { value: 'live-value', secret: false } })
 
     globalConfig.disableStateOutputs = true
 
     const { outputs, actual } = await interop.getOutputs({ stale: true })
-    expect(outputs).toEqual({ key: 'live-value' })
+    expect(outputs).toEqual({ key: { value: 'live-value', secret: false } })
     expect(actual).toBe(true)
     expect(provider.getOutputs).toHaveBeenCalledOnce()
   })
 
   it('should not write outputs to state when disableStateOutputs is true', async () => {
     const { provider, interop } = setup()
-    provider.apply.mockResolvedValue({ url: 'http://localhost' })
+    provider.apply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
 
     globalConfig.disableStateOutputs = true
 
     const mockStateManager = vi.mocked(StateManager)
     const mockUpdate = mockStateManager.mock.results[0]?.value?.update
 
-    await interop.apply({ input: 'val' })
+    await interop.apply({ input: { value: 'val', secret: false } })
     expect(provider.apply).toHaveBeenCalledOnce()
     expect(mockUpdate).not.toHaveBeenCalled()
   })

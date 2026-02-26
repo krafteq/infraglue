@@ -9,5 +9,5 @@ export interface IState {
 
 export interface IWorkspaceState {
   env?: string | undefined
-  outputs?: Record<string, string> | undefined
+  outputs?: Record<string, { value: string; secret: boolean }> | undefined
 }

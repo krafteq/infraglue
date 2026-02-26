@@ -136,7 +136,7 @@ describe('MultistageExecutor', () => {
 
       const plan = createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } })
       mockGetPlan.mockResolvedValue(plan)
-      mockApply.mockResolvedValue({ url: 'http://localhost' })
+      mockApply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
 
       const integration = createInteractiveIntegration()
       await executor.exec({ formatter: createFormatter(), integration })
@@ -156,11 +156,11 @@ describe('MultistageExecutor', () => {
       mockGetPlan.mockResolvedValue(
         createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
       )
-      mockApply.mockResolvedValue({ key: 'applied-value' })
+      mockApply.mockResolvedValue({ key: { value: 'applied-value', secret: false } })
 
       await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
 
-      expect(ctx.findAppliedOutput('ws1', 'key')).toBe('applied-value')
+      expect(ctx.findAppliedOutput('ws1', 'key')).toEqual({ value: 'applied-value', secret: false })
     })
 
     it('should skip and cache outputs when no changes', async () => {
@@ -171,12 +171,12 @@ describe('MultistageExecutor', () => {
       const executor = new MultistageExecutor(ctx)
 
       mockGetPlan.mockResolvedValue(createProviderPlan())
-      mockGetOutputs.mockResolvedValue({ outputs: { existing: 'value' }, actual: true })
+      mockGetOutputs.mockResolvedValue({ outputs: { existing: { value: 'value', secret: false } }, actual: true })
 
       await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
 
       expect(mockApply).not.toHaveBeenCalled()
-      expect(ctx.findAppliedOutput('ws1', 'existing')).toBe('value')
+      expect(ctx.findAppliedOutput('ws1', 'existing')).toEqual({ value: 'value', secret: false })
     })
 
     it('should abort when confirmation denied', async () => {
@@ -236,9 +236,9 @@ describe('MultistageExecutor', () => {
       mockApply.mockImplementation(async () => {
         // First call = network, second = database
         if (mockApply.mock.calls.length === 1) {
-          return { network_name: 'dev_net' }
+          return { network_name: { value: 'dev_net', secret: false } }
         }
-        return { db_host: 'localhost:5432' }
+        return { db_host: { value: 'localhost:5432', secret: false } }
       })
 
       await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
@@ -247,8 +247,8 @@ describe('MultistageExecutor', () => {
       expect(mockApply).toHaveBeenCalledTimes(2)
 
       // Outputs should be stored
-      expect(ctx.findAppliedOutput('network', 'network_name')).toBe('dev_net')
-      expect(ctx.findAppliedOutput('database', 'db_host')).toBe('localhost:5432')
+      expect(ctx.findAppliedOutput('network', 'network_name')).toEqual({ value: 'dev_net', secret: false })
+      expect(ctx.findAppliedOutput('database', 'db_host')).toEqual({ value: 'localhost:5432', secret: false })
     })
 
     it('should handle diamond dependency with outputs flowing through multiple paths', async () => {
@@ -267,7 +267,7 @@ describe('MultistageExecutor', () => {
       let applyCallCount = 0
       mockApply.mockImplementation(async () => {
         applyCallCount++
-        return { output: `value-${applyCallCount}` }
+        return { output: { value: `value-${applyCallCount}`, secret: false } }
       })
 
       await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
@@ -324,8 +324,8 @@ describe('MultistageExecutor', () => {
       const monorepo = new Monorepo('/root', [ws1], [], undefined)
       const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
       // Pre-populate outputs
-      ctx.storeWorkspaceOutputs(ws1, { key: 'val' })
-      expect(ctx.findAppliedOutput('ws1', 'key')).toBe('val')
+      ctx.storeWorkspaceOutputs(ws1, { key: { value: 'val', secret: false } })
+      expect(ctx.findAppliedOutput('ws1', 'key')).toEqual({ value: 'val', secret: false })
 
       const executor = new MultistageExecutor(ctx)
       mockIsDestroyed.mockResolvedValue(false)
@@ -351,11 +351,11 @@ describe('MultistageExecutor', () => {
       mockGetPlan.mockResolvedValue(
         createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
       )
-      mockApply.mockResolvedValue({ url: 'http://localhost:3000' })
+      mockApply.mockResolvedValue({ url: { value: 'http://localhost:3000', secret: false } })
 
       await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
 
-      expect(ctx.findAppliedOutput('ws1', 'url')).toBe('http://localhost:3000')
+      expect(ctx.findAppliedOutput('ws1', 'url')).toEqual({ value: 'http://localhost:3000', secret: false })
     })
   })
 
@@ -368,7 +368,7 @@ describe('MultistageExecutor', () => {
       const executor = new MultistageExecutor(ctx)
 
       mockGetPlan.mockResolvedValue(createProviderPlan())
-      mockGetOutputs.mockResolvedValue({ outputs: { existing: 'value' }, actual: true })
+      mockGetOutputs.mockResolvedValue({ outputs: { existing: { value: 'value', secret: false } }, actual: true })
 
       const result = await executor.plan({ formatter: createFormatter() })
 
@@ -413,7 +413,7 @@ describe('MultistageExecutor', () => {
           changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
         })
       })
-      mockGetOutputs.mockResolvedValue({ outputs: { network_name: 'dev_net' }, actual: true })
+      mockGetOutputs.mockResolvedValue({ outputs: { network_name: { value: 'dev_net', secret: false } }, actual: true })
 
       const result = await executor.plan({ formatter: createFormatter() })
 
@@ -421,7 +421,7 @@ describe('MultistageExecutor', () => {
       expect(mockGetPlan).toHaveBeenCalledTimes(2)
       expect(mockApply).not.toHaveBeenCalled()
       // Outputs from ws1 should be cached for downstream use
-      expect(ctx.findAppliedOutput('ws1', 'network_name')).toBe('dev_net')
+      expect(ctx.findAppliedOutput('ws1', 'network_name')).toEqual({ value: 'dev_net', secret: false })
     })
 
     it('should not call askForConfirmation', async () => {
@@ -559,7 +559,7 @@ describe('MultistageExecutor', () => {
 
       mockGetDriftPlan.mockResolvedValue(createProviderPlan())
       mockGetPlan.mockResolvedValue(createProviderPlan())
-      mockGetOutputs.mockResolvedValue({ outputs: { existing: 'value' }, actual: true })
+      mockGetOutputs.mockResolvedValue({ outputs: { existing: { value: 'value', secret: false } }, actual: true })
 
       const result = await executor.drift({ formatter: createFormatter() })
 
@@ -612,7 +612,7 @@ describe('MultistageExecutor', () => {
         })
       })
       mockGetPlan.mockResolvedValue(createProviderPlan())
-      mockGetOutputs.mockResolvedValue({ outputs: { key: 'val' }, actual: true })
+      mockGetOutputs.mockResolvedValue({ outputs: { key: { value: 'val', secret: false } }, actual: true })
 
       const result = await executor.drift({ formatter: createFormatter() })
 
@@ -634,11 +634,11 @@ describe('MultistageExecutor', () => {
 
       mockGetDriftPlan.mockResolvedValue(createProviderPlan())
       mockGetPlan.mockResolvedValue(createProviderPlan())
-      mockGetOutputs.mockResolvedValue({ outputs: { net: 'dev_net' }, actual: true })
+      mockGetOutputs.mockResolvedValue({ outputs: { net: { value: 'dev_net', secret: false } }, actual: true })
 
       await executor.drift({ formatter: createFormatter() })
 
-      expect(ctx.findAppliedOutput('ws1', 'net')).toBe('dev_net')
+      expect(ctx.findAppliedOutput('ws1', 'net')).toEqual({ value: 'dev_net', secret: false })
     })
 
     it('should work with --project filter', async () => {
@@ -796,7 +796,7 @@ describe('MultistageExecutor', () => {
       const executor = new MultistageExecutor(ctx)
 
       mockRefresh.mockResolvedValue(undefined)
-      mockGetOutputs.mockResolvedValue({ outputs: { key: 'refreshed' }, actual: true })
+      mockGetOutputs.mockResolvedValue({ outputs: { key: { value: 'refreshed', secret: false } }, actual: true })
 
       await executor.refreshState()
 
@@ -816,14 +816,14 @@ describe('MultistageExecutor', () => {
       let callCount = 0
       mockGetOutputs.mockImplementation(async () => {
         callCount++
-        if (callCount === 1) return { outputs: { net: 'dev_net' }, actual: true }
-        return { outputs: { db: 'localhost' }, actual: true }
+        if (callCount === 1) return { outputs: { net: { value: 'dev_net', secret: false } }, actual: true }
+        return { outputs: { db: { value: 'localhost', secret: false } }, actual: true }
       })
 
       await executor.refreshState()
 
-      expect(ctx.findAppliedOutput('ws1', 'net')).toBe('dev_net')
-      expect(ctx.findAppliedOutput('ws2', 'db')).toBe('localhost')
+      expect(ctx.findAppliedOutput('ws1', 'net')).toEqual({ value: 'dev_net', secret: false })
+      expect(ctx.findAppliedOutput('ws2', 'db')).toEqual({ value: 'localhost', secret: false })
     })
 
     it('should work with --project filter', async () => {
