@@ -1,4 +1,4 @@
-import { exec } from 'child_process'
+import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import { basename, join, resolve } from 'path'
 import { access, constants as fsConstants } from 'fs'
@@ -10,6 +10,7 @@ import { logger, UserError, ProviderError } from '../utils/index.js'
 import { mkdir } from 'fs/promises'
 
 const execAsync = promisify(exec)
+const spawnAsync = promisify(spawn)
 const accessAsync = promisify(access)
 
 class PulumiProvider implements IProvider {
@@ -223,7 +224,18 @@ class PulumiProvider implements IProvider {
     env: string,
   ): Promise<void> {
     await this.setPulumiConfig(configuration, await input(), env)
-    await this.execCommand(`pulumi ${command.join(' ')}`, configuration, env)
+    await this.execCommandInteractive(`pulumi ${command.join(' ')}`, configuration, env)
+  }
+
+  private async execCommandInteractive(command: string, configuration: ProviderConfig, env: string): Promise<void> {
+    const options = this.getDefaultExecOptions(configuration, env)
+    logger.debug(`[pulumi] exec (interactive): ${command}\n  cwd: ${configuration.rootPath}`)
+    await spawnAsync(command, [], {
+      shell: true,
+      stdio: 'inherit',
+      cwd: options.cwd as string,
+      env: options.env as NodeJS.ProcessEnv,
+    })
   }
 
   private async execCommand(command: string, configuration: ProviderConfig, env: string): Promise<string> {

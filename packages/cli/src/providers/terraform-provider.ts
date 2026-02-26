@@ -248,6 +248,7 @@ class TerraformProvider implements IProvider {
     await spawnAsync(command, [], {
       shell: true,
       stdio: 'inherit',
+      cwd: configuration.rootPath,
     })
   }
 

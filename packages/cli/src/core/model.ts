@@ -114,6 +114,25 @@ export class Monorepo {
     return dependencies
   }
 
+  public getTransitiveDependants(ws: Workspace): Workspace[] {
+    const visited = new Set<string>()
+    const dependants: Workspace[] = []
+
+    const traverse = (currentWs: Workspace) => {
+      const directDeps = this.getDependants(currentWs)
+      for (const dep of directDeps) {
+        if (!visited.has(dep.name)) {
+          visited.add(dep.name)
+          dependants.push(dep)
+          traverse(dep)
+        }
+      }
+    }
+
+    traverse(ws)
+    return dependants
+  }
+
   public getWorkspace(key: string) {
     const ws = this.findWorkspace(key)
     if (ws === null) {
@@ -220,7 +239,11 @@ export class ExecutionPlanBuilder {
     if (this.ctx.currentWorkspace) {
       candidates = [this.ctx.currentWorkspace]
       if (!this.ctx.ignoreDependencies) {
-        candidates.push(...this.ctx.monorepo.getTransitiveDependencies(this.ctx.currentWorkspace))
+        candidates.push(
+          ...(this.ctx.isDestroy
+            ? this.ctx.monorepo.getTransitiveDependants(this.ctx.currentWorkspace)
+            : this.ctx.monorepo.getTransitiveDependencies(this.ctx.currentWorkspace)),
+        )
       }
     }
     return candidates.filter((x) => x.hasEnv(this.ctx.env))

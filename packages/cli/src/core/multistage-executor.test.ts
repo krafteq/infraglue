@@ -318,6 +318,44 @@ describe('MultistageExecutor', () => {
       expect(mockDestroy).not.toHaveBeenCalled()
     })
 
+    it('should skip input resolution for already-destroyed workspaces', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      // ws2 (level 1 in destroy order) is already destroyed
+      mockIsDestroyed.mockResolvedValue(true)
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      // getInputs should not be called since both workspaces are already destroyed
+      expect(mockGetOutputs).not.toHaveBeenCalled()
+      expect(mockDestroyPlan).not.toHaveBeenCalled()
+      expect(mockDestroy).not.toHaveBeenCalled()
+    })
+
+    it('should not crash when multi-level destroy with all workspaces already destroyed', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const ws3 = createWs('ws3', ['ws2'])
+      const monorepo = new Monorepo('/root', [ws1, ws2, ws3], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockIsDestroyed.mockResolvedValue(true)
+
+      // Should not throw even though all workspaces are already destroyed
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      expect(mockIsDestroyed).toHaveBeenCalledTimes(3)
+      expect(mockDestroyPlan).not.toHaveBeenCalled()
+      expect(mockDestroy).not.toHaveBeenCalled()
+    })
+
     it('should remove outputs for destroyed workspace', async () => {
       envSelected()
       const ws1 = createWs('ws1')
@@ -337,6 +375,81 @@ describe('MultistageExecutor', () => {
       await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
 
       expect(ctx.workspaceOutputs.find((w) => w.name === 'ws1')).toBeUndefined()
+    })
+  })
+
+  describe('parallel failure handling', () => {
+    it('should let all workspaces in a level complete even if one fails', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      let applyCallCount = 0
+      mockApply.mockImplementation(async () => {
+        applyCallCount++
+        if (applyCallCount === 1) {
+          throw new Error('apply failed')
+        }
+        return { key: { value: 'val', secret: false } }
+      })
+
+      await expect(
+        executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+      ).rejects.toThrow('Failed to apply workspaces')
+
+      // Both workspaces attempted apply
+      expect(mockApply).toHaveBeenCalledTimes(2)
+    })
+
+    it('should report failed workspace names in error message', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      let applyCallCount = 0
+      mockApply.mockImplementation(async () => {
+        applyCallCount++
+        if (applyCallCount === 1) {
+          throw new Error('terraform locked')
+        }
+        return {}
+      })
+
+      await expect(
+        executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+      ).rejects.toThrow(/force-unlock/)
+    })
+
+    it('should succeed when all workspaces in parallel level succeed', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockApply.mockResolvedValue({ key: { value: 'val', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      expect(mockApply).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -504,7 +617,7 @@ describe('MultistageExecutor', () => {
       mockApply.mockResolvedValue({})
 
       const integration = createNonInteractiveIntegration()
-      await executor.exec({ formatter: createFormatter(), integration, approve: 1 })
+      await executor.exec({ formatter: createFormatter(), integration, approve: [1] })
 
       expect(integration.askForConfirmation).not.toHaveBeenCalled()
       expect(mockApply).toHaveBeenCalledOnce()
@@ -523,7 +636,7 @@ describe('MultistageExecutor', () => {
       mockApply.mockResolvedValue({})
 
       const integration = createInteractiveIntegration()
-      await executor.exec({ formatter: createFormatter(), integration, approve: 1 })
+      await executor.exec({ formatter: createFormatter(), integration, approve: [1] })
 
       expect(integration.askForConfirmation).not.toHaveBeenCalled()
       expect(mockApply).toHaveBeenCalledOnce()
@@ -546,6 +659,50 @@ describe('MultistageExecutor', () => {
       // askForConfirmation should be called, but apply should not
       expect(integration.askForConfirmation).toHaveBeenCalled()
       expect(mockApply).not.toHaveBeenCalled()
+    })
+
+    it('should auto-approve all levels with --approve all', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockApply.mockResolvedValue({})
+
+      const integration = createNonInteractiveIntegration()
+      await executor.exec({ formatter: createFormatter(), integration, approve: 'all' })
+
+      expect(integration.askForConfirmation).not.toHaveBeenCalled()
+      expect(mockApply).toHaveBeenCalledTimes(2)
+    })
+
+    it('should auto-approve only specified levels with --approve 1,2', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const ws3 = createWs('ws3', ['ws2'])
+      const monorepo = new Monorepo('/root', [ws1, ws2, ws3], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockApply.mockResolvedValue({})
+
+      const integration = createNonInteractiveIntegration()
+      // Approve levels 1 and 2, but not level 3
+      await executor.exec({ formatter: createFormatter(), integration, approve: [1, 2] })
+
+      // Levels 1 and 2 should be auto-approved and applied
+      expect(mockApply).toHaveBeenCalledTimes(2)
+      // Level 3 should trigger askForConfirmation and stop (non-interactive)
+      expect(integration.askForConfirmation).toHaveBeenCalledOnce()
     })
   })
 

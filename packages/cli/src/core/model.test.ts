@@ -90,6 +90,40 @@ describe('Monorepo', () => {
     expect(deps).toEqual([])
   })
 
+  it('should get transitive dependants', () => {
+    // ws1 -> ws2 -> ws3, so dependants of ws1 are [ws2, ws3]
+    const dependants = monorepo.getTransitiveDependants(ws1)
+    expect(dependants).toHaveLength(2)
+    expect(dependants).toContain(ws2)
+    expect(dependants).toContain(ws3)
+  })
+
+  it('should get transitive dependants for middle node', () => {
+    // dependants of ws2 are [ws3]
+    const dependants = monorepo.getTransitiveDependants(ws2)
+    expect(dependants).toHaveLength(1)
+    expect(dependants).toContain(ws3)
+  })
+
+  it('should return empty transitive dependants for leaf node', () => {
+    const dependants = monorepo.getTransitiveDependants(ws3)
+    expect(dependants).toEqual([])
+  })
+
+  it('should handle diamond dependants', () => {
+    const A = createWorkspace('A')
+    const B = createWorkspace('B', ['A'])
+    const C = createWorkspace('C', ['A'])
+    const D = createWorkspace('D', ['B', 'C'])
+    const diamondRepo = new Monorepo('/root', [A, B, C, D], [], undefined)
+
+    const dependants = diamondRepo.getTransitiveDependants(A)
+    expect(dependants).toHaveLength(3)
+    expect(dependants).toContain(B)
+    expect(dependants).toContain(C)
+    expect(dependants).toContain(D)
+  })
+
   it('should default vars to empty object', () => {
     expect(monorepo.vars).toEqual({})
   })
@@ -204,6 +238,30 @@ describe('ExecutionPlanBuilder', () => {
 
     expect(plan.levelsCount).toBe(1)
     expect(plan.levels[0].workspaces).toEqual([wsDevOnly])
+  })
+
+  it('should include dependants (not dependencies) when --project + destroy', () => {
+    // A -> B -> C chain. Destroying B should include C (dependant), not A (dependency)
+    const ctx = new ExecutionContext(monorepo, ws2, false, true, 'dev')
+    const builder = new ExecutionPlanBuilder(ctx)
+    const plan = builder.build()
+
+    const allWorkspaces = plan.levels.flatMap((l) => l.workspaces)
+    expect(allWorkspaces).toContain(ws2) // the selected workspace
+    expect(allWorkspaces).toContain(ws3) // dependant of ws2
+    expect(allWorkspaces).not.toContain(ws1) // dependency of ws2 — should NOT be included
+  })
+
+  it('should include dependencies (not dependants) when --project + apply', () => {
+    // A -> B -> C chain. Applying B should include A (dependency), not C (dependant)
+    const ctx = new ExecutionContext(monorepo, ws2, false, false, 'dev')
+    const builder = new ExecutionPlanBuilder(ctx)
+    const plan = builder.build()
+
+    const allWorkspaces = plan.levels.flatMap((l) => l.workspaces)
+    expect(allWorkspaces).toContain(ws2) // the selected workspace
+    expect(allWorkspaces).toContain(ws1) // dependency of ws2
+    expect(allWorkspaces).not.toContain(ws3) // dependant of ws2 — should NOT be included
   })
 
   it('should throw if dependency missing in env', () => {

@@ -222,8 +222,9 @@ ig plan --env dev --detailed            # classify changes as metadata-only vs r
 
 # Apply with auto-approve (level index is 1-based)
 ig apply --env dev --approve 1          # auto-approve level 1 (no confirmation prompt)
-ig apply --env dev --approve 2          # auto-approve level 2
-ig destroy --env dev --approve 1        # auto-approve destroy
+ig apply --env dev --approve 1,2        # auto-approve levels 1 and 2
+ig apply --env dev --approve all        # auto-approve all levels (no prompts)
+ig destroy --env dev --approve all      # auto-approve all destroy levels
 
 # Drift detection with JSON output for programmatic consumption
 ig drift --env staging --json           # outputs DriftReport JSON to stdout
@@ -235,8 +236,8 @@ ig config show --json                   # parsed monorepo config as JSON
 **Key points for automation:**
 
 - `ig plan` and `ig drift` are read-only and fully non-interactive
-- `ig apply` / `ig destroy` require `--approve <level>` to skip the confirmation prompt. Without it, the command waits for confirmation
-- `--approve` is 1-indexed and applies to a **single level only**. Multi-level monorepos require a separate invocation per level (e.g., `--approve 1`, then `--approve 2`). There is no way to approve all levels at once
+- `ig apply` / `ig destroy` require `--approve` to skip the confirmation prompt. Without it, the command waits for confirmation
+- `--approve` accepts `all` (approve every level), a single number (e.g., `1`), or comma-separated numbers (e.g., `1,2,3`). Level numbers are 1-indexed
 - When no TTY is detected (CI, piped output, agent subprocess), ig auto-selects the `no-tty-cli` integration which suppresses interactive prompts
 - Exit codes: `0` = success/no changes, `1` = error, `2` = changes detected (plan/drift)
 
