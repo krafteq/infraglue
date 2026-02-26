@@ -50,6 +50,7 @@ export function createWorkspace(
   injections: Record<string, { workspace: string; key: string }> = {},
   envs: string[] = ['dev'],
   provider?: IProvider,
+  rootVars: Record<string, string> = {},
 ): Workspace {
   const envConfig: Record<string, EnvironmentConfig> = envs.reduce(
     (acc, env) => ({ ...acc, [env]: {} }),
@@ -63,6 +64,7 @@ export function createWorkspace(
     injections,
     dependsOn,
     envConfig,
+    rootVars,
   )
 }
 
@@ -70,8 +72,9 @@ export function createMonorepo(
   workspaces: Workspace[],
   exports: { name: string; workspace: string; key: string }[] = [],
   config?: ConstructorParameters<typeof Monorepo>[3],
+  vars: Record<string, string> = {},
 ): Monorepo {
-  return new Monorepo('/path/to/monorepo', workspaces, exports, config)
+  return new Monorepo('/path/to/monorepo', workspaces, exports, config, vars)
 }
 
 export function createProviderPlan(overrides: Partial<ProviderPlan> = {}): ProviderPlan {

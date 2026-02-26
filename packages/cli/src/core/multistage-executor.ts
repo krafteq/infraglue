@@ -1,13 +1,7 @@
 import { type ExecutionContext, ExecutionPlanBuilder, Workspace } from './model.js'
 import { StateManager } from './state-manager.js'
 import { logger, UserError } from '../utils/index.js'
-import {
-  type ChangeSummary,
-  hasChanges,
-  type ProviderInput,
-  type ProviderOutput,
-  type ProviderPlan,
-} from '../providers/index.js'
+import { type ChangeSummary, hasChanges, type ProviderInput, type ProviderPlan } from '../providers/index.js'
 import type { IIntegration } from '../integrations/integration.js'
 import type { IFormatter } from '../formatters/formatter.js'
 import { computeDetailedDiff } from './plan-diff.js'
@@ -44,10 +38,8 @@ export class MultistageExecutor {
     const levelPlans: LevelPlanEntry[] = []
 
     for (const workspace of workspaces) {
-      const inputs: ProviderInput = await this.ctx.getInputs(workspace)
       const interop = this.ctx.interop(workspace)
 
-      let plan: ProviderPlan
       if (this.ctx.isDestroy) {
         const isDestroyed = await interop.isDestroyed()
         if (isDestroyed) {
@@ -55,13 +47,16 @@ export class MultistageExecutor {
           continue
         }
 
-        plan = await interop.destroyPlan(inputs)
+        const inputs: ProviderInput = await this.ctx.getInputs(workspace)
+        const plan = await interop.destroyPlan(inputs)
         if (!hasChanges(plan)) {
           logger.info(`✅ Nothing to destroy in ${workspace.name}`)
           continue
         }
+        levelPlans.push({ workspace, inputs, plan })
       } else {
-        plan = await interop.getPlan(inputs, options)
+        const inputs: ProviderInput = await this.ctx.getInputs(workspace)
+        const plan = await interop.getPlan(inputs, options)
         if (!hasChanges(plan)) {
           const { outputs } = await interop.getOutputs({ stale: this.ctx.ignoreDependencies })
           logger.info(`✅ ${workspace.name} is up to date.`)
@@ -71,9 +66,8 @@ export class MultistageExecutor {
           this.ctx.storeWorkspaceOutputs(workspace, outputs)
           continue
         }
+        levelPlans.push({ workspace, inputs, plan })
       }
-
-      levelPlans.push({ workspace, inputs, plan })
     }
 
     return levelPlans
@@ -195,7 +189,7 @@ export class MultistageExecutor {
         continue
       }
 
-      if (opts.approve === levelIndex + 1) {
+      if (isLevelApproved(opts.approve, levelIndex + 1)) {
         this.logPlanSummary(levelIndex, levelPlans, opts.formatter)
         logger.info(`Level ${levelIndex + 1} approved, applying...`)
       } else {
@@ -226,7 +220,7 @@ export class MultistageExecutor {
 
       // Apply all workspaces in this level
       logger.info(`\n🚀 Applying Level ${levelIndex + 1}...`)
-      await Promise.all(
+      const results = await Promise.allSettled(
         levelPlans.map(async ({ workspace, inputs }) => {
           const interop = this.ctx.interop(workspace)
           if (this.ctx.isDestroy) {
@@ -244,6 +238,22 @@ export class MultistageExecutor {
         }),
       )
 
+      const failures = results
+        .map((r, i) => ({ result: r, workspace: levelPlans[i].workspace }))
+        .filter((x): x is { result: PromiseRejectedResult; workspace: Workspace } => x.result.status === 'rejected')
+
+      if (failures.length > 0) {
+        const failedNames = failures.map((f) => f.workspace.name)
+        const action = this.ctx.isDestroy ? 'destroy' : 'apply'
+        for (const { workspace, result } of failures) {
+          logger.error(`   Failed to ${action} ${workspace.name}: ${result.reason}`)
+        }
+        throw new UserError(
+          `Failed to ${action} workspaces: ${failedNames.join(', ')}. ` +
+            `If provider state is locked, run 'ig provider force-unlock <lock-id>' in each failed workspace.`,
+        )
+      }
+
       logger.info(`✅ Level ${levelIndex + 1} completed`)
     }
 
@@ -253,13 +263,13 @@ export class MultistageExecutor {
     } else {
       logger.info('🎉 Infrastructure applied successfully')
       if (!this.ctx.currentWorkspace) {
-        const result: ProviderOutput = {}
+        const result: Record<string, string> = {}
         for (const exp of this.ctx.monorepo.exports) {
-          const valueToOutput = exp.workspace ? this.ctx.findAppliedOutput(exp.workspace, exp.key) : 'TODO?'
-          if (valueToOutput === undefined) {
+          const outputValue = exp.workspace ? this.ctx.findAppliedOutput(exp.workspace, exp.key) : undefined
+          if (outputValue === undefined) {
             logger.warn(`Value to output ${exp.key} from workspace ${exp.workspace} is not found`)
           } else {
-            result[exp.name] = valueToOutput
+            result[exp.name] = outputValue.value
           }
         }
         logger.info('Outputs:')
@@ -439,10 +449,16 @@ function add(changes1: ChangeSummary, changes2: ChangeSummary): ChangeSummary {
   }
 }
 
+function isLevelApproved(approve: number[] | 'all' | undefined, level: number): boolean {
+  if (approve === undefined) return false
+  if (approve === 'all') return true
+  return approve.includes(level)
+}
+
 export interface IExecOptions {
   formatter: IFormatter
   integration: IIntegration
-  approve?: number | undefined
+  approve?: number[] | 'all' | undefined
   preview?: boolean
 }
 

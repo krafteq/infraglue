@@ -36,11 +36,11 @@ describe('StateManager', () => {
 
     it('should persist workspace outputs', async () => {
       await stateManager.update((s) => {
-        s.workspace('ws1').outputs = { key: 'value' }
+        s.workspace('ws1').outputs = { key: { value: 'value', secret: false } }
       })
 
       const state = await stateManager.read()
-      expect(state.workspace('ws1').outputs).toEqual({ key: 'value' })
+      expect(state.workspace('ws1').outputs).toEqual({ key: { value: 'value', secret: false } })
     })
   })
 
@@ -72,13 +72,13 @@ describe('StateManager', () => {
     it('should handle sequential updates preserving all data', async () => {
       for (let i = 0; i < 3; i++) {
         await stateManager.update((s) => {
-          s.workspace(`ws-${i}`).outputs = { key: `value-${i}` }
+          s.workspace(`ws-${i}`).outputs = { key: { value: `value-${i}`, secret: false } }
         })
       }
 
       const state = await stateManager.read()
       for (let i = 0; i < 3; i++) {
-        expect(state.workspace(`ws-${i}`).outputs).toEqual({ key: `value-${i}` })
+        expect(state.workspace(`ws-${i}`).outputs).toEqual({ key: { value: `value-${i}`, secret: false } })
       }
     })
   })
@@ -140,7 +140,7 @@ describe('State', () => {
       const state = new State()
       state.startSelectingEnv('prod')
       state.finishEnvSelection(['ws1'])
-      state.workspace('ws1').outputs = { url: 'http://localhost' }
+      state.workspace('ws1').outputs = { url: { value: 'http://localhost', secret: false } }
 
       const serialized = state.serialize()
       const restored = new State()
@@ -148,7 +148,7 @@ describe('State', () => {
 
       expect(restored.env).toBe('prod')
       expect(restored.isEnvSelected).toBe(true)
-      expect(restored.workspace('ws1').outputs).toEqual({ url: 'http://localhost' })
+      expect(restored.workspace('ws1').outputs).toEqual({ url: { value: 'http://localhost', secret: false } })
     })
 
     it('should serialize minimal state', () => {

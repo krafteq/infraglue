@@ -1,5 +1,5 @@
 // global monorepo context, no workspace is selected
-import type { EnvironmentConfig, IProvider } from '../providers/index.js'
+import type { EnvironmentConfig, IProvider, OutputValue, ProviderInput, ProviderOutput } from '../providers/index.js'
 import { sortGraphNodesByLevels } from '../utils/index.js'
 import type { MonorepoConfig } from './config-files.js'
 import { WorkspaceInterop } from './workspace-interop.js'
@@ -18,7 +18,7 @@ export class ExecutionContext {
     return new WorkspaceInterop(this.monorepo, workspace, this.env)
   }
 
-  public findAppliedOutput(wsKey: string, output: string): string | undefined {
+  public findAppliedOutput(wsKey: string, output: string): OutputValue | undefined {
     const ws = this.monorepo.getWorkspace(wsKey)
     const appliedWs = this.workspaceOutputs.find((x) => x.name === ws.name)
     if (!appliedWs) {
@@ -27,8 +27,8 @@ export class ExecutionContext {
     return appliedWs.outputValues[output]
   }
 
-  public async getInputs(workspace: Workspace): Promise<Record<string, string>> {
-    const inputs: Record<string, string> = {}
+  public async getInputs(workspace: Workspace): Promise<ProviderInput> {
+    const inputs: ProviderInput = {}
 
     for (const injectionKey in workspace.injections) {
       const injection = workspace.injections[injectionKey]
@@ -62,7 +62,7 @@ export class ExecutionContext {
     return inputs
   }
 
-  public storeWorkspaceOutputs(workspace: Workspace, outputs: Record<string, string>) {
+  public storeWorkspaceOutputs(workspace: Workspace, outputs: ProviderOutput) {
     const existingIdx = this.workspaceOutputs.findIndex((x) => x.name === workspace.name)
     if (existingIdx >= 0) {
       this.workspaceOutputs.splice(existingIdx, 1)
@@ -84,6 +84,7 @@ export class Monorepo {
     public readonly workspaces: Workspace[],
     public readonly exports: { name: string; workspace: string; key: string }[],
     public readonly configFile: MonorepoConfig | undefined,
+    public readonly vars: Record<string, string> = {},
   ) {}
 
   public getDependencies(ws: Workspace): Workspace[] {
@@ -113,6 +114,25 @@ export class Monorepo {
     return dependencies
   }
 
+  public getTransitiveDependants(ws: Workspace): Workspace[] {
+    const visited = new Set<string>()
+    const dependants: Workspace[] = []
+
+    const traverse = (currentWs: Workspace) => {
+      const directDeps = this.getDependants(currentWs)
+      for (const dep of directDeps) {
+        if (!visited.has(dep.name)) {
+          visited.add(dep.name)
+          dependants.push(dep)
+          traverse(dep)
+        }
+      }
+    }
+
+    traverse(ws)
+    return dependants
+  }
+
   public getWorkspace(key: string) {
     const ws = this.findWorkspace(key)
     if (ws === null) {
@@ -139,6 +159,7 @@ export class Workspace {
     public readonly injections: Record<string, { workspace: string; key: string }>,
     public readonly dependsOn: string[],
     public readonly envs: Record<string, EnvironmentConfig>,
+    public readonly rootVars: Record<string, string> = {},
   ) {
     this.allDependsOn = [
       ...new Set(
@@ -177,7 +198,7 @@ export class ExecutionLevel {
 export class AppliedWorkspace {
   public constructor(
     public readonly name: string,
-    public readonly outputValues: Record<string, string>,
+    public readonly outputValues: ProviderOutput,
   ) {}
 }
 
@@ -218,7 +239,11 @@ export class ExecutionPlanBuilder {
     if (this.ctx.currentWorkspace) {
       candidates = [this.ctx.currentWorkspace]
       if (!this.ctx.ignoreDependencies) {
-        candidates.push(...this.ctx.monorepo.getTransitiveDependencies(this.ctx.currentWorkspace))
+        candidates.push(
+          ...(this.ctx.isDestroy
+            ? this.ctx.monorepo.getTransitiveDependants(this.ctx.currentWorkspace)
+            : this.ctx.monorepo.getTransitiveDependencies(this.ctx.currentWorkspace)),
+        )
       }
     }
     return candidates.filter((x) => x.hasEnv(this.ctx.env))

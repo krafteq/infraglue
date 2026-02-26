@@ -1,7 +1,12 @@
 import type { ProviderPlan } from './provider-plan.js'
 
-export type ProviderOutput = Record<string, string> // TODO: for pulumi it could be a complex object. MB we need to allow deeper value selection in the future.
-export type ProviderInput = Record<string, string>
+export interface OutputValue {
+  value: string
+  secret: boolean
+}
+
+export type ProviderOutput = Record<string, OutputValue>
+export type ProviderInput = Record<string, OutputValue>
 
 export interface PlatformInjection {
   workspace: string | null
@@ -16,6 +21,7 @@ export interface ProviderConfig {
   depends_on?: string[]
   envs: Record<string, EnvironmentConfig> | undefined
   alias: string
+  rootVars?: Record<string, string>
 }
 
 export interface EnvironmentConfig {

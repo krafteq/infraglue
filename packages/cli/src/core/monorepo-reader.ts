@@ -5,8 +5,9 @@ import { parse as parseYaml } from 'yaml'
 import { glob } from 'node:fs/promises'
 import type { MonorepoConfig, WorkspaceConfig } from './config-files.js'
 import { globalConfig } from './global-config.js'
-import { logger, UserError, ConfigError } from '../utils/index.js'
+import { logger, UserError, ConfigError, interpolateConfig } from '../utils/index.js'
 import { getProvider, providers as knownProviders } from '../providers/index.js'
+import type { EnvironmentConfig } from '../providers/index.js'
 import { monorepoConfigSchema, workspaceConfigSchema, formatZodError } from './schemas.js'
 
 const CONFIG_FILE_NAMES = ['ig.yaml', 'ig.yml']
@@ -43,14 +44,15 @@ export async function tryReadMonorepo(rootPath: string): Promise<Monorepo | null
       throw new ConfigError(formatZodError(parsed.error), configPath)
     }
     const cfg = raw as MonorepoConfig
-    const workspaces = await readWorkspaces(cfg, rootPath)
+    const rootVars = interpolateConfig(parsed.data.vars ?? {}, undefined, 'root ig.yaml vars')
+    const workspaces = await readWorkspaces(cfg, rootPath, rootVars)
 
     const exports = Object.entries(cfg.output || {}).map(([key, value]) => {
       const [workspace, outputKey] = value.split(':')
       return { name: key, workspace: join(rootPath, workspace), key: outputKey }
     })
 
-    return new Monorepo(rootPath, workspaces, exports, cfg)
+    return new Monorepo(rootPath, workspaces, exports, cfg, rootVars)
   }
 
   return null
@@ -70,7 +72,11 @@ async function readConfigFile(dirPath: string): Promise<Record<string, unknown> 
   return null
 }
 
-async function readWorkspaces(monorepoConfig: MonorepoConfig, rootPath: string): Promise<Workspace[]> {
+async function readWorkspaces(
+  monorepoConfig: MonorepoConfig,
+  rootPath: string,
+  rootVars: Record<string, string>,
+): Promise<Workspace[]> {
   if (!monorepoConfig.workspace) {
     return []
   }
@@ -86,10 +92,16 @@ async function readWorkspaces(monorepoConfig: MonorepoConfig, rootPath: string):
     }),
   )
 
-  return (await Promise.all(workspacePaths.flat().map((path) => getWorkspace(path, rootPath)))).filter((x) => !!x)
+  return (await Promise.all(workspacePaths.flat().map((path) => getWorkspace(path, rootPath, rootVars)))).filter(
+    (x) => !!x,
+  )
 }
 
-async function getWorkspace(path: string, rootPath: string): Promise<Workspace | null> {
+async function getWorkspace(
+  path: string,
+  rootPath: string,
+  rootVars: Record<string, string>,
+): Promise<Workspace | null> {
   const raw = await readConfigFile(path)
   if (raw) {
     const parsed = workspaceConfigSchema.safeParse(raw)
@@ -126,8 +138,31 @@ async function getWorkspace(path: string, rootPath: string): Promise<Workspace |
       }),
     ),
     (config?.depends_on || []).map((dependency) => join(path, dependency)),
-    config?.envs ?? {},
+    interpolateEnvConfigs(config?.envs ?? {}, path),
+    rootVars,
   )
+}
+
+function interpolateEnvConfigs(
+  envs: Record<string, EnvironmentConfig>,
+  workspacePath: string,
+): Record<string, EnvironmentConfig> {
+  const result: Record<string, EnvironmentConfig> = {}
+  for (const [envName, envConfig] of Object.entries(envs)) {
+    const ctx = `workspace ${workspacePath} env '${envName}'`
+    const interpolated: EnvironmentConfig = {}
+    if (envConfig.backend_file !== undefined)
+      interpolated.backend_file = interpolateConfig(envConfig.backend_file, undefined, ctx)
+    if (envConfig.backend_type !== undefined)
+      interpolated.backend_type = interpolateConfig(envConfig.backend_type, undefined, ctx)
+    if (envConfig.backend_config !== undefined)
+      interpolated.backend_config = interpolateConfig(envConfig.backend_config, undefined, ctx)
+    if (envConfig.vars !== undefined) interpolated.vars = interpolateConfig(envConfig.vars, undefined, ctx)
+    if (envConfig.var_files !== undefined)
+      interpolated.var_files = interpolateConfig(envConfig.var_files, undefined, ctx)
+    result[envName] = interpolated
+  }
+  return result
 }
 
 async function detectProvider(path: string): Promise<string | null> {

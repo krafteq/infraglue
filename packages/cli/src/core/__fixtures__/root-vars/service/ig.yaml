@@ -1,0 +1,7 @@
+envs:
+  dev:
+    backend_type: local
+    backend_config:
+      path: ./terraform_dev.tfstate
+    vars:
+      region: us-west-2

@@ -1,0 +1,11 @@
+envs:
+  dev:
+    backend_type: ${TEST_IG_BACKEND}
+    backend_config:
+      bucket: ${TEST_IG_BUCKET}
+      key: dev/terraform.tfstate
+    vars:
+      region: ${TEST_IG_REGION}
+      static_val: unchanged
+    var_files:
+      - ./envs/${TEST_IG_REGION}.tfvars

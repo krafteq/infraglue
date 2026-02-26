@@ -34,9 +34,9 @@ const canUseTsNode = () => {
 }
 
 if (canUseTsNode()) {
-  const result = spawnSync('pnpm', ['exec', 'tsx', tsPath, ...args], {
+  const tsxBin = require.resolve('tsx/cli')
+  const result = spawnSync(process.execPath, [tsxBin, tsPath, ...args], {
     stdio: 'inherit',
-    cwd: resolve(__dirname, '..'),
     env: {
       ...process.env,
       __DEV_CWD: process.cwd(),

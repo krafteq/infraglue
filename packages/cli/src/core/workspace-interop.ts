@@ -2,6 +2,7 @@ import { type Monorepo, Workspace } from './model.js'
 import type { IProvider, ProviderConfig, ProviderInput, ProviderOutput, ProviderPlan } from '../providers/index.js'
 import { StateManager } from './state-manager.js'
 import { logger } from '../utils/index.js'
+import { globalConfig } from './global-config.js'
 
 /*
   Calls provider commands on Workspace
@@ -24,7 +25,7 @@ export class WorkspaceInterop {
   }
 
   public async getOutputs(opts?: { stale?: boolean }): Promise<{ outputs: ProviderOutput; actual: boolean }> {
-    if (opts?.stale) {
+    if (opts?.stale && !globalConfig.disableStateOutputs) {
       const state = await this.stateManager.read()
       const cachedOutputs = state.workspace(this.workspace.name).outputs
       if (cachedOutputs) {
@@ -92,7 +93,9 @@ export class WorkspaceInterop {
   }
 
   private async storeOutputs(outputs: ProviderOutput | null): Promise<void> {
-    // todo: ignore by configuration
+    if (globalConfig.disableStateOutputs) {
+      return
+    }
     await this.stateManager.update((s) => {
       s.workspace(this.workspace.name).outputs = outputs == null ? undefined : outputs
     })
@@ -107,6 +110,7 @@ export class WorkspaceInterop {
       provider: this.workspace.providerName,
       depends_on: this.workspace.allDependsOn,
       injections: this.workspace.injections,
+      rootVars: this.workspace.rootVars,
     }
   }
 }

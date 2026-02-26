@@ -96,6 +96,35 @@ describe('monorepoConfigSchema', () => {
     const result = monorepoConfigSchema.parse({ workspace: ['./apps/*'] })
     expect(result.output).toBeUndefined()
   })
+
+  it('should accept config with vars', () => {
+    const result = monorepoConfigSchema.parse({
+      workspace: ['./*'],
+      vars: { region: 'us-east-1', env_name: 'dev' },
+    })
+    expect(result.vars).toEqual({ region: 'us-east-1', env_name: 'dev' })
+  })
+
+  it('should coerce numeric vars to strings', () => {
+    const result = monorepoConfigSchema.parse({
+      workspace: ['./*'],
+      vars: { port: 3000, count: 5 },
+    })
+    expect(result.vars).toEqual({ port: '3000', count: '5' })
+  })
+
+  it('should transform null vars to undefined', () => {
+    const result = monorepoConfigSchema.parse({
+      workspace: ['./*'],
+      vars: null,
+    })
+    expect(result.vars).toBeUndefined()
+  })
+
+  it('should accept config without vars', () => {
+    const result = monorepoConfigSchema.parse({ workspace: ['./*'] })
+    expect(result.vars).toBeUndefined()
+  })
 })
 
 describe('formatZodError', () => {

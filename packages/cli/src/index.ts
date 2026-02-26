@@ -56,6 +56,10 @@ program
     if (command.opts().strict) {
       globalConfig.strict = true
     }
+    const disableStateOutputs = process.env['IG_DISABLE_STATE_OUTPUTS']
+    if (disableStateOutputs === '1' || disableStateOutputs === 'true') {
+      globalConfig.disableStateOutputs = true
+    }
     currentDir = resolve(command.opts().directory)
     monorepo = await tryResolveMonorepo(currentDir)
   })
@@ -80,7 +84,7 @@ envCommand
 interface IApplyOptions {
   format?: string
   integration?: string
-  approve?: number
+  approve?: number[] | 'all'
   env: string
   project?: string
 }
@@ -130,14 +134,20 @@ for (const execCmd of execCommands) {
     .option('-f, --format <format>', 'Select formatter for the plan', 'default')
     .option('-i, --integration <integration>', 'Integration to use', 'cli')
     .option(
-      '-a, --approve <level_index>',
-      'Approve the plan for a specific level for non-interactive integration',
-      (value) => {
-        const parsedValue = parseInt(value, 10)
-        if (isNaN(parsedValue)) {
-          throw new Error('The level_index must be a number')
+      '-a, --approve <levels>',
+      'Auto-approve levels: "all" or comma-separated level numbers (e.g., "1,2,3")',
+      (value: string): number[] | 'all' => {
+        if (value === 'all') {
+          return 'all'
         }
-        return parsedValue
+        const levels = value.split(',').map((s) => {
+          const n = parseInt(s.trim(), 10)
+          if (isNaN(n)) {
+            throw new Error(`Invalid level number: "${s.trim()}". Use "all" or comma-separated numbers (e.g., "1,2,3")`)
+          }
+          return n
+        })
+        return levels
       },
     )
     .option('-p, --project <project>', 'Project to apply')
@@ -380,6 +390,8 @@ for (const execCmd of execCommands) {
 Examples:
   $ ig ${execCmd.name} --env staging
   $ ig ${execCmd.name} --env production --approve 1
+  $ ig ${execCmd.name} --env production --approve 1,2,3
+  $ ig ${execCmd.name} --env production --approve all
   $ ig ${execCmd.name} --env dev --project postgres`,
   )
 }

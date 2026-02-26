@@ -29,6 +29,11 @@ export const workspaceConfigSchema = z.object({
 export const monorepoConfigSchema = z.object({
   workspace: z.array(z.string()).min(1, 'At least one workspace glob is required'),
   output: z.record(z.string()).optional(),
+  vars: z
+    .record(z.coerce.string())
+    .optional()
+    .nullable()
+    .transform((v) => v ?? undefined),
 })
 
 export function formatZodError(error: ZodError): string {

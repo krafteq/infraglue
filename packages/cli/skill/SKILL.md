@@ -31,6 +31,10 @@ Located at the monorepo root. Defines workspace discovery and global outputs.
 workspace:
   - './*' # glob patterns matching workspace directories
 
+vars: # optional: shared variables injected into all workspaces at lowest priority
+  region: us-east-1
+  env_name: production
+
 output: # optional: expose workspace outputs at monorepo level
   postgres_host: './postgres:database_host' # format: './workspace-dir:output_key'
   app_url: './express-service:app_url'
@@ -38,10 +42,11 @@ output: # optional: expose workspace outputs at monorepo level
 
 ### Fields
 
-| Field       | Type                     | Required | Description                                                               |
-| ----------- | ------------------------ | -------- | ------------------------------------------------------------------------- |
-| `workspace` | `string[]`               | Yes      | Glob patterns to discover workspace directories (must match at least one) |
-| `output`    | `Record<string, string>` | No       | Map of exported names to `'./workspace:output_key'` references            |
+| Field       | Type                     | Required | Description                                                                                        |
+| ----------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------- |
+| `workspace` | `string[]`               | Yes      | Glob patterns to discover workspace directories (must match at least one)                          |
+| `vars`      | `Record<string, string>` | No       | Shared variables passed to all workspaces (lowest priority, overridden by env vars and injections) |
+| `output`    | `Record<string, string>` | No       | Map of exported names to `'./workspace:output_key'` references                                     |
 
 ## Workspace-Level ig.yaml
 
@@ -110,6 +115,43 @@ Each key under `envs` is an environment name with this structure:
 | `var_files`      | `string[]`               | Variable files passed to provider (Terraform `-var-file`)                                       |
 
 Use `backend_type` + `backend_config` OR `backend_file`, not both.
+
+### Variable Priority
+
+Variables are merged with the following priority (highest wins):
+
+1. **Injections** (outputs from upstream workspaces) — highest priority
+2. **Workspace env vars** (`envs.<env>.vars`) — overrides root vars
+3. **Root vars** (`vars` in root ig.yaml) — lowest priority, shared defaults
+
+This means a workspace can override root-level defaults by declaring the same variable in its `envs.<env>.vars`, and injections always take precedence over both.
+
+### Environment Variable Interpolation
+
+String values in `vars`, `backend_config`, `backend_type`, `backend_file`, and `var_files` support `${ENV_VAR}` syntax, resolved from the shell environment at parse time.
+
+```yaml
+# root ig.yaml
+vars:
+  region: ${AWS_REGION}
+
+# workspace ig.yaml
+envs:
+  prod:
+    backend_type: s3
+    backend_config:
+      bucket: ${TF_STATE_BUCKET}
+      key: prod/terraform.tfstate
+    vars:
+      db_host: ${DATABASE_HOST}
+    var_files:
+      - ./envs/${AWS_REGION}.tfvars
+```
+
+- `${VAR}` resolves to the value of environment variable `VAR`
+- `$${VAR}` escapes to the literal string `${VAR}` (no interpolation)
+- A missing (unset) environment variable throws an error; empty string is valid
+- Structural fields (`workspace`, `injection`, `depends_on`, `alias`, `provider`, `output`) are NOT interpolated
 
 ## Dependency Injection
 
@@ -180,8 +222,9 @@ ig plan --env dev --detailed            # classify changes as metadata-only vs r
 
 # Apply with auto-approve (level index is 1-based)
 ig apply --env dev --approve 1          # auto-approve level 1 (no confirmation prompt)
-ig apply --env dev --approve 2          # auto-approve level 2
-ig destroy --env dev --approve 1        # auto-approve destroy
+ig apply --env dev --approve 1,2        # auto-approve levels 1 and 2
+ig apply --env dev --approve all        # auto-approve all levels (no prompts)
+ig destroy --env dev --approve all      # auto-approve all destroy levels
 
 # Drift detection with JSON output for programmatic consumption
 ig drift --env staging --json           # outputs DriftReport JSON to stdout
@@ -193,8 +236,8 @@ ig config show --json                   # parsed monorepo config as JSON
 **Key points for automation:**
 
 - `ig plan` and `ig drift` are read-only and fully non-interactive
-- `ig apply` / `ig destroy` require `--approve <level>` to skip the confirmation prompt. Without it, the command waits for confirmation
-- `--approve` is 1-indexed and applies to a **single level only**. Multi-level monorepos require a separate invocation per level (e.g., `--approve 1`, then `--approve 2`). There is no way to approve all levels at once
+- `ig apply` / `ig destroy` require `--approve` to skip the confirmation prompt. Without it, the command waits for confirmation
+- `--approve` accepts `all` (approve every level), a single number (e.g., `1`), or comma-separated numbers (e.g., `1,2,3`). Level numbers are 1-indexed
 - When no TTY is detected (CI, piped output, agent subprocess), ig auto-selects the `no-tty-cli` integration which suppresses interactive prompts
 - Exit codes: `0` = success/no changes, `1` = error, `2` = changes detected (plan/drift)
 
@@ -206,6 +249,13 @@ ig config show --json                   # parsed monorepo config as JSON
 | `-v, --verbose`         | Verbose output                                   |
 | `-q, --quiet`           | Quiet output                                     |
 | `--strict`              | Fail on most warnings                            |
+
+### Environment Variables
+
+| Variable                   | Values      | Description                                                                                                                                               |
+| -------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IG_DEBUG` / `IG_VERBOSE`  | `1`         | Enable verbose/debug output (same as `--verbose` flag)                                                                                                    |
+| `IG_DISABLE_STATE_OUTPUTS` | `1`, `true` | Skip caching workspace outputs in `.ig/state.json`. Outputs are always fetched live from the provider. Use when you don't want secrets persisted to disk. |
 
 ### Drift Detection
 
@@ -275,10 +325,11 @@ The selected environment is stored in `.ig/.env` at the monorepo root. This file
 
 ## Troubleshooting
 
-| Error                          | Cause                                        | Fix                                                               |
-| ------------------------------ | -------------------------------------------- | ----------------------------------------------------------------- |
-| `Monorepo not found in <dir>`  | No `ig.yaml` with `workspace` field found    | Ensure root `ig.yaml` exists with `workspace` globs               |
-| `No environment selected`      | No env stored and no `--env` flag            | Run `ig env select <env>` or pass `--env`                         |
-| `Single workspace is required` | `provider` command run from monorepo root    | `cd` into a workspace dir or pass `--project`                     |
-| Workspace not discovered       | Directory doesn't match any `workspace` glob | Check glob patterns in root `ig.yaml`                             |
-| Provider not detected          | No `.tf` or `Pulumi.yaml` files in workspace | Add IaC files or set `provider` explicitly in workspace `ig.yaml` |
+| Error                                 | Cause                                        | Fix                                                               |
+| ------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------- |
+| `Monorepo not found in <dir>`         | No `ig.yaml` with `workspace` field found    | Ensure root `ig.yaml` exists with `workspace` globs               |
+| `No environment selected`             | No env stored and no `--env` flag            | Run `ig env select <env>` or pass `--env`                         |
+| `Single workspace is required`        | `provider` command run from monorepo root    | `cd` into a workspace dir or pass `--project`                     |
+| Workspace not discovered              | Directory doesn't match any `workspace` glob | Check glob patterns in root `ig.yaml`                             |
+| Provider not detected                 | No `.tf` or `Pulumi.yaml` files in workspace | Add IaC files or set `provider` explicitly in workspace `ig.yaml` |
+| `Environment variable 'X' is not set` | `${X}` used in config but `X` is not in env  | Set the env var or use `$${X}` to escape as literal               |

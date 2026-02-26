@@ -1,5 +1,5 @@
 import { AppliedWorkspace, ExecutionContext, ExecutionPlanBuilder, Monorepo } from './model.js'
-import { createWorkspace } from '../__test-utils__/mock-provider.js'
+import { createMonorepo, createWorkspace } from '../__test-utils__/mock-provider.js'
 
 describe('Workspace', () => {
   it('should calculate allDependsOn correctly', () => {
@@ -23,6 +23,16 @@ describe('Workspace', () => {
     expect(ws.hasEnv('dev')).toBe(true)
     expect(ws.hasEnv('prod')).toBe(true)
     expect(ws.hasEnv('staging')).toBe(false)
+  })
+
+  it('should default rootVars to empty object', () => {
+    const ws = createWorkspace('ws1')
+    expect(ws.rootVars).toEqual({})
+  })
+
+  it('should store rootVars when provided', () => {
+    const ws = createWorkspace('ws1', [], {}, ['dev'], undefined, { region: 'us-east-1' })
+    expect(ws.rootVars).toEqual({ region: 'us-east-1' })
   })
 })
 
@@ -79,18 +89,61 @@ describe('Monorepo', () => {
     const deps = monorepo.getTransitiveDependencies(ws1)
     expect(deps).toEqual([])
   })
+
+  it('should get transitive dependants', () => {
+    // ws1 -> ws2 -> ws3, so dependants of ws1 are [ws2, ws3]
+    const dependants = monorepo.getTransitiveDependants(ws1)
+    expect(dependants).toHaveLength(2)
+    expect(dependants).toContain(ws2)
+    expect(dependants).toContain(ws3)
+  })
+
+  it('should get transitive dependants for middle node', () => {
+    // dependants of ws2 are [ws3]
+    const dependants = monorepo.getTransitiveDependants(ws2)
+    expect(dependants).toHaveLength(1)
+    expect(dependants).toContain(ws3)
+  })
+
+  it('should return empty transitive dependants for leaf node', () => {
+    const dependants = monorepo.getTransitiveDependants(ws3)
+    expect(dependants).toEqual([])
+  })
+
+  it('should handle diamond dependants', () => {
+    const A = createWorkspace('A')
+    const B = createWorkspace('B', ['A'])
+    const C = createWorkspace('C', ['A'])
+    const D = createWorkspace('D', ['B', 'C'])
+    const diamondRepo = new Monorepo('/root', [A, B, C, D], [], undefined)
+
+    const dependants = diamondRepo.getTransitiveDependants(A)
+    expect(dependants).toHaveLength(3)
+    expect(dependants).toContain(B)
+    expect(dependants).toContain(C)
+    expect(dependants).toContain(D)
+  })
+
+  it('should default vars to empty object', () => {
+    expect(monorepo.vars).toEqual({})
+  })
+
+  it('should store vars when provided', () => {
+    const repo = createMonorepo(workspaces, [], undefined, { region: 'us-east-1' })
+    expect(repo.vars).toEqual({ region: 'us-east-1' })
+  })
 })
 
 describe('ExecutionContext', () => {
   const ws1 = createWorkspace('ws1')
   const ws2 = createWorkspace('ws2')
-  const appliedWs1 = new AppliedWorkspace('ws1', { out1: 'val1' })
+  const appliedWs1 = new AppliedWorkspace('ws1', { out1: { value: 'val1', secret: false } })
   const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
   const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
   ctx.storeWorkspaceOutputs(ws1, appliedWs1.outputValues)
 
   it('should find output from applied workspace', () => {
-    expect(ctx.findAppliedOutput('ws1', 'out1')).toBe('val1')
+    expect(ctx.findAppliedOutput('ws1', 'out1')).toEqual({ value: 'val1', secret: false })
     expect(ctx.findAppliedOutput('ws1', 'out2')).toBeUndefined()
     expect(ctx.findAppliedOutput('ws2', 'out1')).toBeUndefined()
   })
@@ -100,7 +153,7 @@ describe('ExecutionContext', () => {
       input1: { workspace: 'ws1', key: 'out1' },
     })
     const inputs = await ctx.getInputs(ws2WithInj)
-    expect(inputs).toEqual({ input1: 'val1' })
+    expect(inputs).toEqual({ input1: { value: 'val1', secret: false } })
   })
 
   it('should throw error if injection value not found', async () => {
@@ -113,14 +166,14 @@ describe('ExecutionContext', () => {
   })
 
   it('should store applied workspace', () => {
-    ctx.storeWorkspaceOutputs(ws2, { out2: 'val2' })
+    ctx.storeWorkspaceOutputs(ws2, { out2: { value: 'val2', secret: false } })
     expect(ctx.workspaceOutputs).toHaveLength(2)
-    expect(ctx.findAppliedOutput('ws2', 'out2')).toBe('val2')
+    expect(ctx.findAppliedOutput('ws2', 'out2')).toEqual({ value: 'val2', secret: false })
 
     // Update existing
-    ctx.storeWorkspaceOutputs(ws2, { out2: 'new-val2' })
+    ctx.storeWorkspaceOutputs(ws2, { out2: { value: 'new-val2', secret: false } })
     expect(ctx.workspaceOutputs).toHaveLength(2)
-    expect(ctx.findAppliedOutput('ws2', 'out2')).toBe('new-val2')
+    expect(ctx.findAppliedOutput('ws2', 'out2')).toEqual({ value: 'new-val2', secret: false })
   })
 
   it('should remove destroyed workspace', () => {
@@ -185,6 +238,30 @@ describe('ExecutionPlanBuilder', () => {
 
     expect(plan.levelsCount).toBe(1)
     expect(plan.levels[0].workspaces).toEqual([wsDevOnly])
+  })
+
+  it('should include dependants (not dependencies) when --project + destroy', () => {
+    // A -> B -> C chain. Destroying B should include C (dependant), not A (dependency)
+    const ctx = new ExecutionContext(monorepo, ws2, false, true, 'dev')
+    const builder = new ExecutionPlanBuilder(ctx)
+    const plan = builder.build()
+
+    const allWorkspaces = plan.levels.flatMap((l) => l.workspaces)
+    expect(allWorkspaces).toContain(ws2) // the selected workspace
+    expect(allWorkspaces).toContain(ws3) // dependant of ws2
+    expect(allWorkspaces).not.toContain(ws1) // dependency of ws2 — should NOT be included
+  })
+
+  it('should include dependencies (not dependants) when --project + apply', () => {
+    // A -> B -> C chain. Applying B should include A (dependency), not C (dependant)
+    const ctx = new ExecutionContext(monorepo, ws2, false, false, 'dev')
+    const builder = new ExecutionPlanBuilder(ctx)
+    const plan = builder.build()
+
+    const allWorkspaces = plan.levels.flatMap((l) => l.workspaces)
+    expect(allWorkspaces).toContain(ws2) // the selected workspace
+    expect(allWorkspaces).toContain(ws1) // dependency of ws2
+    expect(allWorkspaces).not.toContain(ws3) // dependant of ws2 — should NOT be included
   })
 
   it('should throw if dependency missing in env', () => {
