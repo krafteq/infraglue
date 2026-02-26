@@ -126,6 +126,33 @@ Variables are merged with the following priority (highest wins):
 
 This means a workspace can override root-level defaults by declaring the same variable in its `envs.<env>.vars`, and injections always take precedence over both.
 
+### Environment Variable Interpolation
+
+String values in `vars`, `backend_config`, `backend_type`, `backend_file`, and `var_files` support `${ENV_VAR}` syntax, resolved from the shell environment at parse time.
+
+```yaml
+# root ig.yaml
+vars:
+  region: ${AWS_REGION}
+
+# workspace ig.yaml
+envs:
+  prod:
+    backend_type: s3
+    backend_config:
+      bucket: ${TF_STATE_BUCKET}
+      key: prod/terraform.tfstate
+    vars:
+      db_host: ${DATABASE_HOST}
+    var_files:
+      - ./envs/${AWS_REGION}.tfvars
+```
+
+- `${VAR}` resolves to the value of environment variable `VAR`
+- `$${VAR}` escapes to the literal string `${VAR}` (no interpolation)
+- A missing (unset) environment variable throws an error; empty string is valid
+- Structural fields (`workspace`, `injection`, `depends_on`, `alias`, `provider`, `output`) are NOT interpolated
+
 ## Dependency Injection
 
 Workspaces wire outputs from upstream workspaces using the `injection` field:
@@ -297,10 +324,11 @@ The selected environment is stored in `.ig/.env` at the monorepo root. This file
 
 ## Troubleshooting
 
-| Error                          | Cause                                        | Fix                                                               |
-| ------------------------------ | -------------------------------------------- | ----------------------------------------------------------------- |
-| `Monorepo not found in <dir>`  | No `ig.yaml` with `workspace` field found    | Ensure root `ig.yaml` exists with `workspace` globs               |
-| `No environment selected`      | No env stored and no `--env` flag            | Run `ig env select <env>` or pass `--env`                         |
-| `Single workspace is required` | `provider` command run from monorepo root    | `cd` into a workspace dir or pass `--project`                     |
-| Workspace not discovered       | Directory doesn't match any `workspace` glob | Check glob patterns in root `ig.yaml`                             |
-| Provider not detected          | No `.tf` or `Pulumi.yaml` files in workspace | Add IaC files or set `provider` explicitly in workspace `ig.yaml` |
+| Error                                 | Cause                                        | Fix                                                               |
+| ------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------- |
+| `Monorepo not found in <dir>`         | No `ig.yaml` with `workspace` field found    | Ensure root `ig.yaml` exists with `workspace` globs               |
+| `No environment selected`             | No env stored and no `--env` flag            | Run `ig env select <env>` or pass `--env`                         |
+| `Single workspace is required`        | `provider` command run from monorepo root    | `cd` into a workspace dir or pass `--project`                     |
+| Workspace not discovered              | Directory doesn't match any `workspace` glob | Check glob patterns in root `ig.yaml`                             |
+| Provider not detected                 | No `.tf` or `Pulumi.yaml` files in workspace | Add IaC files or set `provider` explicitly in workspace `ig.yaml` |
+| `Environment variable 'X' is not set` | `${X}` used in config but `X` is not in env  | Set the env var or use `$${X}` to escape as literal               |

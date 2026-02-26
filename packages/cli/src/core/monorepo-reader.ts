@@ -5,8 +5,9 @@ import { parse as parseYaml } from 'yaml'
 import { glob } from 'node:fs/promises'
 import type { MonorepoConfig, WorkspaceConfig } from './config-files.js'
 import { globalConfig } from './global-config.js'
-import { logger, UserError, ConfigError } from '../utils/index.js'
+import { logger, UserError, ConfigError, interpolateConfig } from '../utils/index.js'
 import { getProvider, providers as knownProviders } from '../providers/index.js'
+import type { EnvironmentConfig } from '../providers/index.js'
 import { monorepoConfigSchema, workspaceConfigSchema, formatZodError } from './schemas.js'
 
 const CONFIG_FILE_NAMES = ['ig.yaml', 'ig.yml']
@@ -43,7 +44,7 @@ export async function tryReadMonorepo(rootPath: string): Promise<Monorepo | null
       throw new ConfigError(formatZodError(parsed.error), configPath)
     }
     const cfg = raw as MonorepoConfig
-    const rootVars = parsed.data.vars ?? {}
+    const rootVars = interpolateConfig(parsed.data.vars ?? {}, undefined, 'root ig.yaml vars')
     const workspaces = await readWorkspaces(cfg, rootPath, rootVars)
 
     const exports = Object.entries(cfg.output || {}).map(([key, value]) => {
@@ -137,9 +138,31 @@ async function getWorkspace(
       }),
     ),
     (config?.depends_on || []).map((dependency) => join(path, dependency)),
-    config?.envs ?? {},
+    interpolateEnvConfigs(config?.envs ?? {}, path),
     rootVars,
   )
+}
+
+function interpolateEnvConfigs(
+  envs: Record<string, EnvironmentConfig>,
+  workspacePath: string,
+): Record<string, EnvironmentConfig> {
+  const result: Record<string, EnvironmentConfig> = {}
+  for (const [envName, envConfig] of Object.entries(envs)) {
+    const ctx = `workspace ${workspacePath} env '${envName}'`
+    const interpolated: EnvironmentConfig = {}
+    if (envConfig.backend_file !== undefined)
+      interpolated.backend_file = interpolateConfig(envConfig.backend_file, undefined, ctx)
+    if (envConfig.backend_type !== undefined)
+      interpolated.backend_type = interpolateConfig(envConfig.backend_type, undefined, ctx)
+    if (envConfig.backend_config !== undefined)
+      interpolated.backend_config = interpolateConfig(envConfig.backend_config, undefined, ctx)
+    if (envConfig.vars !== undefined) interpolated.vars = interpolateConfig(envConfig.vars, undefined, ctx)
+    if (envConfig.var_files !== undefined)
+      interpolated.var_files = interpolateConfig(envConfig.var_files, undefined, ctx)
+    result[envName] = interpolated
+  }
+  return result
 }
 
 async function detectProvider(path: string): Promise<string | null> {

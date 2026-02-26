@@ -2,6 +2,7 @@ import { resolve, join } from 'path'
 import { tryReadMonorepo, tryResolveMonorepo } from './monorepo-reader.js'
 import { mkdtemp, rm, mkdir, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
+import { UserError } from '../utils/index.js'
 
 const FIXTURES_DIR = resolve(import.meta.dirname, '__fixtures__')
 
@@ -225,6 +226,80 @@ describe('tryReadMonorepo', () => {
       const service = monorepo!.workspaces.find((w) => w.name === 'service')!
       expect(service.envs.dev.vars).toEqual({ region: 'us-west-2' })
       expect(service.rootVars).toEqual({ region: 'us-east-1', env_name: 'shared' })
+    })
+  })
+
+  describe('env-interpolation fixture', () => {
+    const fixturePath = join(FIXTURES_DIR, 'env-interpolation')
+    const savedEnv: Record<string, string | undefined> = {}
+    const testVars = {
+      TEST_IG_REGION: 'eu-west-1',
+      TEST_IG_BACKEND: 's3',
+      TEST_IG_BUCKET: 'my-state-bucket',
+    }
+
+    beforeEach(() => {
+      for (const [key, value] of Object.entries(testVars)) {
+        savedEnv[key] = process.env[key]
+        process.env[key] = value
+      }
+    })
+
+    afterEach(() => {
+      for (const key of Object.keys(testVars)) {
+        if (savedEnv[key] === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = savedEnv[key]
+        }
+      }
+    })
+
+    it('should interpolate root vars from env', async () => {
+      const monorepo = await tryReadMonorepo(fixturePath)
+      expect(monorepo).not.toBeNull()
+      expect(monorepo!.vars.region).toBe('eu-west-1')
+    })
+
+    it('should preserve escaped $${} as literal ${} in root vars', async () => {
+      const monorepo = await tryReadMonorepo(fixturePath)
+      expect(monorepo!.vars.escaped).toBe('${NOT_INTERPOLATED}')
+    })
+
+    it('should interpolate workspace backend_type', async () => {
+      const monorepo = await tryReadMonorepo(fixturePath)
+      const service = monorepo!.workspaces.find((w) => w.name === 'service')!
+      expect(service.envs.dev.backend_type).toBe('s3')
+    })
+
+    it('should interpolate workspace backend_config values', async () => {
+      const monorepo = await tryReadMonorepo(fixturePath)
+      const service = monorepo!.workspaces.find((w) => w.name === 'service')!
+      expect(service.envs.dev.backend_config).toEqual({
+        bucket: 'my-state-bucket',
+        key: 'dev/terraform.tfstate',
+      })
+    })
+
+    it('should interpolate workspace vars', async () => {
+      const monorepo = await tryReadMonorepo(fixturePath)
+      const service = monorepo!.workspaces.find((w) => w.name === 'service')!
+      expect(service.envs.dev.vars).toEqual({
+        region: 'eu-west-1',
+        static_val: 'unchanged',
+      })
+    })
+
+    it('should interpolate workspace var_files', async () => {
+      const monorepo = await tryReadMonorepo(fixturePath)
+      const service = monorepo!.workspaces.find((w) => w.name === 'service')!
+      expect(service.envs.dev.var_files).toEqual(['./envs/eu-west-1.tfvars'])
+    })
+
+    it('should throw UserError for missing env var', async () => {
+      delete process.env['TEST_IG_REGION']
+      await expect(tryReadMonorepo(fixturePath)).rejects.toThrow(UserError)
+      await expect(tryReadMonorepo(fixturePath)).rejects.toThrow("Environment variable 'TEST_IG_REGION' is not set")
     })
   })
 

@@ -1,0 +1,6 @@
+workspace:
+  - './*'
+
+vars:
+  region: ${TEST_IG_REGION}
+  escaped: $${NOT_INTERPOLATED}
