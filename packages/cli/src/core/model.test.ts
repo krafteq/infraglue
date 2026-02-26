@@ -1,5 +1,5 @@
 import { AppliedWorkspace, ExecutionContext, ExecutionPlanBuilder, Monorepo } from './model.js'
-import { createWorkspace } from '../__test-utils__/mock-provider.js'
+import { createMonorepo, createWorkspace } from '../__test-utils__/mock-provider.js'
 
 describe('Workspace', () => {
   it('should calculate allDependsOn correctly', () => {
@@ -23,6 +23,16 @@ describe('Workspace', () => {
     expect(ws.hasEnv('dev')).toBe(true)
     expect(ws.hasEnv('prod')).toBe(true)
     expect(ws.hasEnv('staging')).toBe(false)
+  })
+
+  it('should default rootVars to empty object', () => {
+    const ws = createWorkspace('ws1')
+    expect(ws.rootVars).toEqual({})
+  })
+
+  it('should store rootVars when provided', () => {
+    const ws = createWorkspace('ws1', [], {}, ['dev'], undefined, { region: 'us-east-1' })
+    expect(ws.rootVars).toEqual({ region: 'us-east-1' })
   })
 })
 
@@ -78,6 +88,15 @@ describe('Monorepo', () => {
   it('should handle no dependencies', () => {
     const deps = monorepo.getTransitiveDependencies(ws1)
     expect(deps).toEqual([])
+  })
+
+  it('should default vars to empty object', () => {
+    expect(monorepo.vars).toEqual({})
+  })
+
+  it('should store vars when provided', () => {
+    const repo = createMonorepo(workspaces, [], undefined, { region: 'us-east-1' })
+    expect(repo.vars).toEqual({ region: 'us-east-1' })
   })
 })
 

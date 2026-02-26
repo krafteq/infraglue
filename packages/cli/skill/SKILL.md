@@ -31,6 +31,10 @@ Located at the monorepo root. Defines workspace discovery and global outputs.
 workspace:
   - './*' # glob patterns matching workspace directories
 
+vars: # optional: shared variables injected into all workspaces at lowest priority
+  region: us-east-1
+  env_name: production
+
 output: # optional: expose workspace outputs at monorepo level
   postgres_host: './postgres:database_host' # format: './workspace-dir:output_key'
   app_url: './express-service:app_url'
@@ -38,10 +42,11 @@ output: # optional: expose workspace outputs at monorepo level
 
 ### Fields
 
-| Field       | Type                     | Required | Description                                                               |
-| ----------- | ------------------------ | -------- | ------------------------------------------------------------------------- |
-| `workspace` | `string[]`               | Yes      | Glob patterns to discover workspace directories (must match at least one) |
-| `output`    | `Record<string, string>` | No       | Map of exported names to `'./workspace:output_key'` references            |
+| Field       | Type                     | Required | Description                                                                                        |
+| ----------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------- |
+| `workspace` | `string[]`               | Yes      | Glob patterns to discover workspace directories (must match at least one)                          |
+| `vars`      | `Record<string, string>` | No       | Shared variables passed to all workspaces (lowest priority, overridden by env vars and injections) |
+| `output`    | `Record<string, string>` | No       | Map of exported names to `'./workspace:output_key'` references                                     |
 
 ## Workspace-Level ig.yaml
 
@@ -110,6 +115,16 @@ Each key under `envs` is an environment name with this structure:
 | `var_files`      | `string[]`               | Variable files passed to provider (Terraform `-var-file`)                                       |
 
 Use `backend_type` + `backend_config` OR `backend_file`, not both.
+
+### Variable Priority
+
+Variables are merged with the following priority (highest wins):
+
+1. **Injections** (outputs from upstream workspaces) — highest priority
+2. **Workspace env vars** (`envs.<env>.vars`) — overrides root vars
+3. **Root vars** (`vars` in root ig.yaml) — lowest priority, shared defaults
+
+This means a workspace can override root-level defaults by declaring the same variable in its `envs.<env>.vars`, and injections always take precedence over both.
 
 ## Dependency Injection
 
@@ -206,6 +221,13 @@ ig config show --json                   # parsed monorepo config as JSON
 | `-v, --verbose`         | Verbose output                                   |
 | `-q, --quiet`           | Quiet output                                     |
 | `--strict`              | Fail on most warnings                            |
+
+### Environment Variables
+
+| Variable                   | Values      | Description                                                                                                                                               |
+| -------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IG_DEBUG` / `IG_VERBOSE`  | `1`         | Enable verbose/debug output (same as `--verbose` flag)                                                                                                    |
+| `IG_DISABLE_STATE_OUTPUTS` | `1`, `true` | Skip caching workspace outputs in `.ig/state.json`. Outputs are always fetched live from the provider. Use when you don't want secrets persisted to disk. |
 
 ### Drift Detection
 

@@ -55,6 +55,18 @@ describe('tryReadMonorepo', () => {
       const monorepo = await tryReadMonorepo(fixturePath)
       expect(monorepo!.path).toBe(fixturePath)
     })
+
+    it('should default vars to empty when not specified', async () => {
+      const monorepo = await tryReadMonorepo(fixturePath)
+      expect(monorepo!.vars).toEqual({})
+    })
+
+    it('should default workspace rootVars to empty when no root vars', async () => {
+      const monorepo = await tryReadMonorepo(fixturePath)
+      for (const ws of monorepo!.workspaces) {
+        expect(ws.rootVars).toEqual({})
+      }
+    })
   })
 
   describe('cross-provider fixture', () => {
@@ -190,6 +202,29 @@ describe('tryReadMonorepo', () => {
     it('should have empty envs for no-config workspace', async () => {
       const monorepo = await tryReadMonorepo(fixturePath)
       expect(monorepo!.workspaces[0].envs).toEqual({})
+    })
+  })
+
+  describe('root-vars fixture', () => {
+    const fixturePath = join(FIXTURES_DIR, 'root-vars')
+
+    it('should parse root-level vars', async () => {
+      const monorepo = await tryReadMonorepo(fixturePath)
+      expect(monorepo).not.toBeNull()
+      expect(monorepo!.vars).toEqual({ region: 'us-east-1', env_name: 'shared' })
+    })
+
+    it('should propagate rootVars to workspaces', async () => {
+      const monorepo = await tryReadMonorepo(fixturePath)
+      const service = monorepo!.workspaces.find((w) => w.name === 'service')!
+      expect(service.rootVars).toEqual({ region: 'us-east-1', env_name: 'shared' })
+    })
+
+    it('should keep workspace env vars separate from rootVars', async () => {
+      const monorepo = await tryReadMonorepo(fixturePath)
+      const service = monorepo!.workspaces.find((w) => w.name === 'service')!
+      expect(service.envs.dev.vars).toEqual({ region: 'us-west-2' })
+      expect(service.rootVars).toEqual({ region: 'us-east-1', env_name: 'shared' })
     })
   })
 

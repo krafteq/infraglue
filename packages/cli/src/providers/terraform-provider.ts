@@ -159,7 +159,8 @@ class TerraformProvider implements IProvider {
 
   private async getVariableString(configuration: ProviderConfig, input: ProviderInput, environment: string) {
     const { var_files, vars } = configuration.envs?.[environment] || { vars: {}, var_files: [] }
-    const variables = Object.entries({ ...vars, ...input }) // TODO: what is more important? or maybe error in case of collision?
+    const rootVars = configuration.rootVars ?? {}
+    const variables = Object.entries({ ...rootVars, ...vars, ...input })
       .map(([key, value]) => `${key}="${value}"`)
       .join('\n')
     const stateManager = new StateManager(configuration.rootMonoRepoFolder)

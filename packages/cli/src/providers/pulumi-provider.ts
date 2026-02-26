@@ -35,7 +35,7 @@ class PulumiProvider implements IProvider {
 
     await this.execCommand(`pulumi up --yes --json`, configuration, env)
 
-    const outputStdout = await this.execCommand(`pulumi stack output --json`, configuration, env)
+    const outputStdout = await this.execCommand(`pulumi stack output --json --show-secrets`, configuration, env)
 
     const outputs = JSON.parse(outputStdout) as Record<string, { value: unknown }>
 
@@ -48,7 +48,7 @@ class PulumiProvider implements IProvider {
   }
 
   async getOutputs(configuration: ProviderConfig, env: string): Promise<ProviderOutput> {
-    const outputStdout = await this.execCommand(`pulumi stack output --json`, configuration, env)
+    const outputStdout = await this.execCommand(`pulumi stack output --json --show-secrets`, configuration, env)
 
     const outputs = JSON.parse(outputStdout) as Record<string, unknown>
     return Object.fromEntries(
@@ -137,9 +137,9 @@ class PulumiProvider implements IProvider {
   }
 
   private async setPulumiConfig(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<void> {
+    const rootVars = configuration.rootVars ?? {}
     const envVars = configuration.envs?.[env]?.vars || {}
-    // TODO: what should have higher priority? input or env?
-    for (const [key, value] of Object.entries({ ...envVars, ...input })) {
+    for (const [key, value] of Object.entries({ ...rootVars, ...envVars, ...input })) {
       await this.execCommand(`pulumi config set ${key} ${value}`, configuration, env)
     }
   }

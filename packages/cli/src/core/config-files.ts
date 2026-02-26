@@ -3,6 +3,7 @@ import type { EnvironmentConfig } from '../providers'
 export interface MonorepoConfig {
   workspace?: string[]
   output?: Record<string, string>
+  vars?: Record<string, string>
   [key: string]: unknown
 }
 

@@ -56,6 +56,10 @@ program
     if (command.opts().strict) {
       globalConfig.strict = true
     }
+    const disableStateOutputs = process.env['IG_DISABLE_STATE_OUTPUTS']
+    if (disableStateOutputs === '1' || disableStateOutputs === 'true') {
+      globalConfig.disableStateOutputs = true
+    }
     currentDir = resolve(command.opts().directory)
     monorepo = await tryResolveMonorepo(currentDir)
   })

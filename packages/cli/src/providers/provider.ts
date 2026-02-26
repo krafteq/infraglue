@@ -16,6 +16,7 @@ export interface ProviderConfig {
   depends_on?: string[]
   envs: Record<string, EnvironmentConfig> | undefined
   alias: string
+  rootVars?: Record<string, string>
 }
 
 export interface EnvironmentConfig {

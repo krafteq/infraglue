@@ -43,14 +43,15 @@ export async function tryReadMonorepo(rootPath: string): Promise<Monorepo | null
       throw new ConfigError(formatZodError(parsed.error), configPath)
     }
     const cfg = raw as MonorepoConfig
-    const workspaces = await readWorkspaces(cfg, rootPath)
+    const rootVars = parsed.data.vars ?? {}
+    const workspaces = await readWorkspaces(cfg, rootPath, rootVars)
 
     const exports = Object.entries(cfg.output || {}).map(([key, value]) => {
       const [workspace, outputKey] = value.split(':')
       return { name: key, workspace: join(rootPath, workspace), key: outputKey }
     })
 
-    return new Monorepo(rootPath, workspaces, exports, cfg)
+    return new Monorepo(rootPath, workspaces, exports, cfg, rootVars)
   }
 
   return null
@@ -70,7 +71,11 @@ async function readConfigFile(dirPath: string): Promise<Record<string, unknown> 
   return null
 }
 
-async function readWorkspaces(monorepoConfig: MonorepoConfig, rootPath: string): Promise<Workspace[]> {
+async function readWorkspaces(
+  monorepoConfig: MonorepoConfig,
+  rootPath: string,
+  rootVars: Record<string, string>,
+): Promise<Workspace[]> {
   if (!monorepoConfig.workspace) {
     return []
   }
@@ -86,10 +91,16 @@ async function readWorkspaces(monorepoConfig: MonorepoConfig, rootPath: string):
     }),
   )
 
-  return (await Promise.all(workspacePaths.flat().map((path) => getWorkspace(path, rootPath)))).filter((x) => !!x)
+  return (await Promise.all(workspacePaths.flat().map((path) => getWorkspace(path, rootPath, rootVars)))).filter(
+    (x) => !!x,
+  )
 }
 
-async function getWorkspace(path: string, rootPath: string): Promise<Workspace | null> {
+async function getWorkspace(
+  path: string,
+  rootPath: string,
+  rootVars: Record<string, string>,
+): Promise<Workspace | null> {
   const raw = await readConfigFile(path)
   if (raw) {
     const parsed = workspaceConfigSchema.safeParse(raw)
@@ -127,6 +138,7 @@ async function getWorkspace(path: string, rootPath: string): Promise<Workspace |
     ),
     (config?.depends_on || []).map((dependency) => join(path, dependency)),
     config?.envs ?? {},
+    rootVars,
   )
 }
 

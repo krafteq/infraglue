@@ -84,6 +84,7 @@ export class Monorepo {
     public readonly workspaces: Workspace[],
     public readonly exports: { name: string; workspace: string; key: string }[],
     public readonly configFile: MonorepoConfig | undefined,
+    public readonly vars: Record<string, string> = {},
   ) {}
 
   public getDependencies(ws: Workspace): Workspace[] {
@@ -139,6 +140,7 @@ export class Workspace {
     public readonly injections: Record<string, { workspace: string; key: string }>,
     public readonly dependsOn: string[],
     public readonly envs: Record<string, EnvironmentConfig>,
+    public readonly rootVars: Record<string, string> = {},
   ) {
     this.allDependsOn = [
       ...new Set(

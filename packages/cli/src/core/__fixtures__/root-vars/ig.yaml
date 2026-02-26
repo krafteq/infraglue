@@ -1,0 +1,6 @@
+workspace:
+  - './*'
+
+vars:
+  region: us-east-1
+  env_name: shared

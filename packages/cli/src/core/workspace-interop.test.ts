@@ -3,6 +3,7 @@ import { WorkspaceInterop } from './workspace-interop.js'
 import { Monorepo, Workspace } from './model.js'
 import { MockProvider, createProviderPlan } from '../__test-utils__/mock-provider.js'
 import { StateManager, State } from './state-manager.js'
+import { globalConfig } from './global-config.js'
 import type { ProviderPlan } from '../providers/provider-plan.js'
 
 // Mock the state manager to avoid filesystem
@@ -51,6 +52,7 @@ function setup(opts?: { cachedOutputs?: Record<string, string> }) {
 describe('WorkspaceInterop', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    globalConfig.disableStateOutputs = false
   })
 
   it('should throw when workspace missing requested env', () => {
@@ -222,6 +224,32 @@ describe('WorkspaceInterop', () => {
       { key: 'value' },
       'dev',
     )
+  })
+
+  it('should fetch live outputs when disableStateOutputs is true even with stale flag', async () => {
+    const { provider, interop } = setup({ cachedOutputs: { key: 'cached-value' } })
+    provider.getOutputs.mockResolvedValue({ key: 'live-value' })
+
+    globalConfig.disableStateOutputs = true
+
+    const { outputs, actual } = await interop.getOutputs({ stale: true })
+    expect(outputs).toEqual({ key: 'live-value' })
+    expect(actual).toBe(true)
+    expect(provider.getOutputs).toHaveBeenCalledOnce()
+  })
+
+  it('should not write outputs to state when disableStateOutputs is true', async () => {
+    const { provider, interop } = setup()
+    provider.apply.mockResolvedValue({ url: 'http://localhost' })
+
+    globalConfig.disableStateOutputs = true
+
+    const mockStateManager = vi.mocked(StateManager)
+    const mockUpdate = mockStateManager.mock.results[0]?.value?.update
+
+    await interop.apply({ input: 'val' })
+    expect(provider.apply).toHaveBeenCalledOnce()
+    expect(mockUpdate).not.toHaveBeenCalled()
   })
 
   it('should build correct provider config', async () => {
