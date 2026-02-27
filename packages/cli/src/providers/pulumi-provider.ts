@@ -31,10 +31,16 @@ class PulumiProvider implements IProvider {
     return this.mapPulumiOutputToProviderPlan(stdout, basename(configuration.rootPath))
   }
 
-  async apply(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderOutput> {
+  async apply(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    env: string,
+    options?: { skipPreview?: boolean },
+  ): Promise<ProviderOutput> {
     await this.setPulumiConfig(configuration, input, env)
 
-    await this.execCommand(`pulumi up --yes --json`, configuration, env)
+    const skipPreviewFlag = options?.skipPreview ? ' --skip-preview' : ''
+    await this.execCommand(`pulumi up --yes --json${skipPreviewFlag}`, configuration, env)
 
     return this.getOutputsWithSecretDetection(configuration, env)
   }
@@ -159,7 +165,7 @@ class PulumiProvider implements IProvider {
     }
     for (const [key, outputValue] of Object.entries(allVars)) {
       const secretFlag = outputValue.secret ? ' --secret' : ''
-      await this.execCommand(`pulumi config set${secretFlag} ${key} ${outputValue.value}`, configuration, env)
+      await this.execCommand(`pulumi config set${secretFlag} ${key} -- ${outputValue.value}`, configuration, env)
     }
   }
 
