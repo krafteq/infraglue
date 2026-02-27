@@ -111,6 +111,19 @@ describe('WorkspaceInterop', () => {
     expect(provider.apply).toHaveBeenCalledOnce()
   })
 
+  it('should pass skipPreview option to provider apply', async () => {
+    const { provider, interop } = setup()
+    provider.apply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
+
+    await interop.apply({ input: { value: 'val', secret: false } }, { skipPreview: true })
+    expect(provider.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ alias: 'ws1' }),
+      { input: { value: 'val', secret: false } },
+      'dev',
+      { skipPreview: true },
+    )
+  })
+
   it('should delegate destroyPlan to provider', async () => {
     const { provider, interop } = setup()
     const mockPlan: ProviderPlan = {

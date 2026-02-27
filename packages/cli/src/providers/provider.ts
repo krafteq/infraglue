@@ -42,7 +42,12 @@ export interface IProvider {
     env: string,
     options?: { detailed?: boolean; refresh?: boolean },
   ): Promise<ProviderPlan>
-  apply(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderOutput>
+  apply(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    env: string,
+    options?: { skipPreview?: boolean },
+  ): Promise<ProviderOutput>
   getOutputs(configuration: ProviderConfig, env: string): Promise<ProviderOutput>
   // TODO: apply plan only
 

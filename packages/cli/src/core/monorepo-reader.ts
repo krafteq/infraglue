@@ -140,6 +140,7 @@ async function getWorkspace(
     (config?.depends_on || []).map((dependency) => join(path, dependency)),
     interpolateEnvConfigs(config?.envs ?? {}, path),
     rootVars,
+    config?.skip_preview ?? false,
   )
 }
 
