@@ -23,6 +23,29 @@ InfraGlue orchestrates multiple Terraform and Pulumi workspaces in a single mono
 4. Workspaces at the same level run in the same stage; levels execute sequentially
 5. Outputs from upstream workspaces are injected as variables into downstream workspaces
 
+## Agent Usage
+
+**If you are an AI coding agent, read this section first.** These rules prevent the most common mistakes agents make with ig.
+
+1. **Let ig orchestrate — do NOT parallelize manually.** Run `ig apply --approve all` or `ig destroy --approve all` to operate on the full monorepo. ig handles dependency ordering, output injection, and parallelism internally. Do NOT run separate `ig apply --project X` commands in parallel — this is the single most common agent mistake.
+
+2. **Never run ig commands concurrently.** ig uses a process-local mutex to protect `.ig/state.json`. Running two `ig` processes at the same time causes race conditions — lost output data, broken dependency injection, and corrupted state. Always wait for one `ig` command to finish before starting the next.
+
+3. **Select the environment once, then omit `--env`.** For single-environment setups (or when working in one env for a session), run `ig env select <env>` once at the start. All subsequent commands use the selected env automatically. Only pass `--env` when you need to switch environments mid-session.
+
+4. **Prefer whole-monorepo commands.** `ig plan`, `ig apply`, `ig destroy`, and `ig drift` all operate across every workspace by default. Only use `--project` for targeted single-workspace operations like debugging, import, or export.
+
+5. **Use `--approve all` for apply and destroy.** ig auto-detects non-TTY environments and suppresses interactive prompts, but `ig apply` and `ig destroy` still require explicit `--approve` to proceed. Always pass `--approve all` in agent/CI contexts.
+
+```bash
+# Correct agent workflow
+ig env select dev
+ig plan                        # preview all workspaces
+ig apply --approve all         # apply all workspaces in dependency order
+ig drift                       # check for drift across all workspaces
+ig destroy --approve all       # tear down in reverse dependency order
+```
+
 ## Root-Level ig.yaml
 
 Located at the monorepo root. Defines workspace discovery and global outputs.
@@ -213,35 +236,23 @@ ig install-skill                      # install into .claude/skills/infraglue/SK
 ig install-skill --force              # overwrite existing
 ```
 
-### Non-Interactive / CI / Agent Usage
+### Non-Interactive / CI Usage
 
-When running from CI, a coding agent, or any non-TTY environment, ig auto-detects the context and disables interactive prompts. **Always prefer non-interactive flags** to avoid hanging on confirmation prompts.
+> **AI agents:** see the [Agent Usage](#agent-usage) section above for the correct workflow. The details below are reference for CI pipelines and scripting.
 
-```bash
-# Plan is always non-interactive — just check exit code
-ig plan --env dev --project myws        # exit code: 0 = no changes, 2 = changes found
-ig plan --env dev --detailed            # classify changes as metadata-only vs real
+**`--approve` syntax** (for `ig apply` and `ig destroy`):
 
-# Apply with auto-approve (level index is 1-based)
-ig apply --env dev --approve 1          # auto-approve level 1 (no confirmation prompt)
-ig apply --env dev --approve 1,2        # auto-approve levels 1 and 2
-ig apply --env dev --approve all        # auto-approve all levels (no prompts)
-ig destroy --env dev --approve all      # auto-approve all destroy levels
+| Value   | Effect                             |
+| ------- | ---------------------------------- |
+| `all`   | Auto-approve every execution level |
+| `1`     | Auto-approve level 1 only          |
+| `1,2,3` | Auto-approve specific levels       |
 
-# Drift detection with JSON output for programmatic consumption
-ig drift --env staging --json           # outputs DriftReport JSON to stdout
+Level numbers are 1-indexed. Without `--approve`, the command waits for interactive confirmation.
 
-# Config inspection
-ig config show --json                   # parsed monorepo config as JSON
-```
+**Exit codes:** `0` = success / no changes, `1` = error, `2` = changes detected (plan/drift)
 
-**Key points for automation:**
-
-- `ig plan` and `ig drift` are read-only and fully non-interactive
-- `ig apply` / `ig destroy` require `--approve` to skip the confirmation prompt. Without it, the command waits for confirmation
-- `--approve` accepts `all` (approve every level), a single number (e.g., `1`), or comma-separated numbers (e.g., `1,2,3`). Level numbers are 1-indexed
-- When no TTY is detected (CI, piped output, agent subprocess), ig auto-selects the `no-tty-cli` integration which suppresses interactive prompts
-- Exit codes: `0` = success/no changes, `1` = error, `2` = changes detected (plan/drift)
+**TTY detection:** when no TTY is detected (CI, piped output, agent subprocess), ig auto-selects the `no-tty-cli` integration which suppresses interactive prompts. `ig plan` and `ig drift` are always non-interactive.
 
 ### Global Options
 
@@ -362,3 +373,4 @@ When `ig plan` or `ig apply` detects no resource changes in a workspace, it comp
 | `Environment variable 'X' is not set`    | `${X}` used in config but `X` is not in env          | Set the env var or use `$${X}` to escape as literal                                                                            |
 | Provider state locked after failed apply | A previous `ig apply` or `ig destroy` failed mid-run | Run `ig provider force-unlock <lock-id>` in each failed workspace, or `pulumi cancel` for Pulumi                               |
 | Destroy fails with missing upstream      | Upstream workspace already destroyed in a prior run  | ig `>=0.3.0` handles this automatically with placeholder inputs. On older versions, re-apply upstream first or use `--no-deps` |
+| Corrupted state / lost outputs           | Multiple `ig` processes ran concurrently             | Never run ig commands in parallel — ig uses a process-local mutex on `.ig/state.json`. Wait for each command to finish         |
