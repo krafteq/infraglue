@@ -1,6 +1,6 @@
 // global monorepo context, no workspace is selected
 import type { EnvironmentConfig, IProvider, OutputValue, ProviderInput, ProviderOutput } from '../providers/index.js'
-import { sortGraphNodesByLevels } from '../utils/index.js'
+import { logger, sortGraphNodesByLevels } from '../utils/index.js'
 import type { MonorepoConfig } from './config-files.js'
 import { WorkspaceInterop } from './workspace-interop.js'
 
@@ -27,7 +27,7 @@ export class ExecutionContext {
     return appliedWs.outputValues[output]
   }
 
-  public async getInputs(workspace: Workspace): Promise<ProviderInput> {
+  public async getInputs(workspace: Workspace, opts?: { bestEffort?: boolean }): Promise<ProviderInput> {
     const inputs: ProviderInput = {}
 
     for (const injectionKey in workspace.injections) {
@@ -42,21 +42,44 @@ export class ExecutionContext {
       if (appliedWs) {
         const val = appliedWs.outputValues[injection.key]
         if (val === undefined) {
+          if (opts?.bestEffort) {
+            logger.warn(
+              `Value to inject ${injection.key} from workspace ${ws.name} is not found, using placeholder for destroy`,
+            )
+            inputs[injectionKey] = { value: '', secret: false }
+            continue
+          }
           throw new Error(`Value to inject ${injection.key} from workspace ${ws.name} is not found`)
         }
         inputs[injectionKey] = val
         continue
       }
 
-      const { outputs, actual } = await this.interop(ws).getOutputs({ stale: this.ignoreDependencies })
-      if (actual) {
-        this.storeWorkspaceOutputs(ws, outputs)
+      try {
+        const { outputs, actual } = await this.interop(ws).getOutputs({ stale: this.ignoreDependencies })
+        if (actual) {
+          this.storeWorkspaceOutputs(ws, outputs)
+        }
+        const val = outputs[injection.key]
+        if (val === undefined) {
+          if (opts?.bestEffort) {
+            logger.warn(
+              `Value to inject ${injection.key} from workspace ${ws.name} is not found, using placeholder for destroy`,
+            )
+            inputs[injectionKey] = { value: '', secret: false }
+            continue
+          }
+          throw new Error(`Value to inject ${injection.key} from workspace ${ws.name} is not found`)
+        }
+        inputs[injectionKey] = val
+      } catch (error) {
+        if (opts?.bestEffort) {
+          logger.warn(`Failed to get outputs from workspace ${ws.name}, using placeholder for destroy: ${error}`)
+          inputs[injectionKey] = { value: '', secret: false }
+          continue
+        }
+        throw error
       }
-      const val = outputs[injection.key]
-      if (val === undefined) {
-        throw new Error(`Value to inject ${injection.key} from workspace ${ws.name} is not found`)
-      }
-      inputs[injectionKey] = val
     }
 
     return inputs
@@ -160,6 +183,7 @@ export class Workspace {
     public readonly dependsOn: string[],
     public readonly envs: Record<string, EnvironmentConfig>,
     public readonly rootVars: Record<string, string> = {},
+    public readonly skipPreview: boolean = false,
   ) {
     this.allDependsOn = [
       ...new Set(

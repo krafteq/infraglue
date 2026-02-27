@@ -1,7 +1,14 @@
 import { type ExecutionContext, ExecutionPlanBuilder, Workspace } from './model.js'
 import { StateManager } from './state-manager.js'
 import { logger, UserError } from '../utils/index.js'
-import { type ChangeSummary, hasChanges, type ProviderInput, type ProviderPlan } from '../providers/index.js'
+import {
+  type ChangeSummary,
+  hasChanges,
+  type Output,
+  type ProviderInput,
+  type ProviderOutput,
+  type ProviderPlan,
+} from '../providers/index.js'
 import type { IIntegration } from '../integrations/integration.js'
 import type { IFormatter } from '../formatters/formatter.js'
 import { computeDetailedDiff } from './plan-diff.js'
@@ -47,7 +54,7 @@ export class MultistageExecutor {
           continue
         }
 
-        const inputs: ProviderInput = await this.ctx.getInputs(workspace)
+        const inputs: ProviderInput = await this.ctx.getInputs(workspace, { bestEffort: true })
         const plan = await interop.destroyPlan(inputs)
         if (!hasChanges(plan)) {
           logger.info(`✅ Nothing to destroy in ${workspace.name}`)
@@ -56,9 +63,33 @@ export class MultistageExecutor {
         levelPlans.push({ workspace, inputs, plan })
       } else {
         const inputs: ProviderInput = await this.ctx.getInputs(workspace)
+
+        if (workspace.skipPreview) {
+          logger.info(`⏩ ${workspace.name} has skip_preview enabled, skipping plan`)
+          const syntheticPlan: ProviderPlan = {
+            provider: workspace.providerName,
+            projectName: workspace.name,
+            timestamp: new Date(),
+            resourceChanges: [],
+            outputs: [],
+            diagnostics: [],
+            changeSummary: { add: 0, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+            metadata: { skipPreview: true },
+          }
+          levelPlans.push({ workspace, inputs, plan: syntheticPlan })
+          continue
+        }
+
         const plan = await interop.getPlan(inputs, options)
         if (!hasChanges(plan)) {
           const { outputs } = await interop.getOutputs({ stale: this.ctx.ignoreDependencies })
+
+          if (hasOutputDiff(plan.outputs, outputs)) {
+            logger.info(`📤 ${workspace.name} has output-only changes`)
+            levelPlans.push({ workspace, inputs, plan })
+            continue
+          }
+
           logger.info(`✅ ${workspace.name} is up to date.`)
 
           // TODO: outputs can contain secrets, decide if we want to output them
@@ -230,7 +261,8 @@ export class MultistageExecutor {
             logger.info(`   ✅ ${workspace.name} destroyed successfully`)
           } else {
             logger.info(`   Applying ${workspace.name}...`)
-            const outputs = await interop.apply(inputs)
+            const applyOpts = workspace.skipPreview ? { skipPreview: true } : undefined
+            const outputs = await interop.apply(inputs, applyOpts)
             this.ctx.storeWorkspaceOutputs(workspace, outputs)
             logger.info(`   ✅ ${workspace.name} applied successfully`)
           }
@@ -469,4 +501,22 @@ export interface IPlanExecOptions {
 
 export interface PlanResult {
   hasChanges: boolean
+}
+
+export function hasOutputDiff(planOutputs: Output[], cachedOutputs: ProviderOutput): boolean {
+  // If the plan reports no outputs, we can't detect a diff (not all providers include outputs in plan)
+  if (planOutputs.length === 0) return false
+
+  const planOutputMap = new Map(planOutputs.map((o) => [o.name, o.value]))
+  const cachedKeys = new Set(Object.keys(cachedOutputs))
+
+  for (const [name, value] of planOutputMap) {
+    if (!cachedOutputs[name] || cachedOutputs[name].value !== value) return true
+  }
+
+  for (const key of cachedKeys) {
+    if (!planOutputMap.has(key)) return true
+  }
+
+  return false
 }

@@ -43,8 +43,8 @@ export class WorkspaceInterop {
     return this.provider.getPlan(this.providerConfig(), input, this.env, options)
   }
 
-  public async apply(input: ProviderInput): Promise<ProviderOutput> {
-    const outputs = await this.provider.apply(this.providerConfig(), input, this.env)
+  public async apply(input: ProviderInput, options?: { skipPreview?: boolean }): Promise<ProviderOutput> {
+    const outputs = await this.provider.apply(this.providerConfig(), input, this.env, options)
     await this.storeOutputs(outputs)
     return outputs
   }

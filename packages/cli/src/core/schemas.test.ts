@@ -64,6 +64,13 @@ describe('workspaceConfigSchema', () => {
     expect(result.depends_on).toEqual(['../network'])
   })
 
+  it('should accept skip_preview boolean', () => {
+    const result = workspaceConfigSchema.parse({
+      skip_preview: true,
+    })
+    expect(result.skip_preview).toBe(true)
+  })
+
   it('should reject invalid depends_on type', () => {
     const result = workspaceConfigSchema.safeParse({
       depends_on: 'not-an-array',

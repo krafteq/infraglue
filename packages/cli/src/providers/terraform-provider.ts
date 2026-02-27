@@ -47,7 +47,12 @@ class TerraformProvider implements IProvider {
     return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
   }
 
-  async apply(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderOutput> {
+  async apply(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    environment: string,
+    _options?: { skipPreview?: boolean },
+  ): Promise<ProviderOutput> {
     const variables = await this.getVariableString(configuration, input, environment)
 
     await this.execCommand(`terraform apply --auto-approve --json ${variables}`, configuration)

@@ -1,6 +1,7 @@
 import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import { basename, join, resolve } from 'path'
+import { homedir } from 'os'
 import { access, constants as fsConstants } from 'fs'
 import type { ProviderConfig, ProviderInput, ProviderOutput, OutputValue } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary, ChangeAction } from './provider-plan.js'
@@ -31,10 +32,16 @@ class PulumiProvider implements IProvider {
     return this.mapPulumiOutputToProviderPlan(stdout, basename(configuration.rootPath))
   }
 
-  async apply(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderOutput> {
+  async apply(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    env: string,
+    options?: { skipPreview?: boolean },
+  ): Promise<ProviderOutput> {
     await this.setPulumiConfig(configuration, input, env)
 
-    await this.execCommand(`pulumi up --yes --json`, configuration, env)
+    const skipPreviewFlag = options?.skipPreview ? ' --skip-preview' : ''
+    await this.execCommand(`pulumi up --yes --json${skipPreviewFlag}`, configuration, env)
 
     return this.getOutputsWithSecretDetection(configuration, env)
   }
@@ -105,8 +112,8 @@ class PulumiProvider implements IProvider {
   private async initializePulumi(configuration: ProviderConfig, env: string): Promise<void> {
     const backendConfig = configuration.envs?.[env]?.backend_config
     if (backendConfig?.['PULUMI_BACKEND_URL'] && backendConfig['PULUMI_BACKEND_URL'].startsWith('file://')) {
-      const localBackendFolderPath = backendConfig['PULUMI_BACKEND_URL'].substring('file://'.length)
-      await mkdir(resolve(configuration.rootPath, localBackendFolderPath), { recursive: true })
+      const resolvedPath = resolveFileBackendPath(configuration.rootPath, backendConfig['PULUMI_BACKEND_URL'])
+      await mkdir(resolvedPath, { recursive: true })
     }
 
     await this.execCommand('pulumi install', configuration, env)
@@ -159,7 +166,7 @@ class PulumiProvider implements IProvider {
     }
     for (const [key, outputValue] of Object.entries(allVars)) {
       const secretFlag = outputValue.secret ? ' --secret' : ''
-      await this.execCommand(`pulumi config set${secretFlag} ${key} ${outputValue.value}`, configuration, env)
+      await this.execCommand(`pulumi config set${secretFlag} ${key} -- ${outputValue.value}`, configuration, env)
     }
   }
 
@@ -272,6 +279,14 @@ class PulumiProvider implements IProvider {
 
 function toNonSecretInput(vars: Record<string, string>): ProviderInput {
   return Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, { value: v, secret: false }]))
+}
+
+export function resolveFileBackendPath(rootPath: string, backendUrl: string): string {
+  let localPath = backendUrl.substring('file://'.length)
+  if (localPath === '~' || localPath.startsWith('~/')) {
+    localPath = join(homedir(), localPath.substring(1))
+  }
+  return resolve(rootPath, localPath)
 }
 
 export const pulumiProvider = new PulumiProvider() as IProvider

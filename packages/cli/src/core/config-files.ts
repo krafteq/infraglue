@@ -14,5 +14,6 @@ export interface WorkspaceConfig {
   depends_on?: string[]
   envs?: Record<string, EnvironmentConfig>
   alias?: string
+  skip_preview?: boolean
   [key: string]: unknown
 }

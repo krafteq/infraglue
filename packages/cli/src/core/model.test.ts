@@ -165,6 +165,14 @@ describe('ExecutionContext', () => {
     )
   })
 
+  it('should use placeholder inputs when bestEffort is true and injection value not found', async () => {
+    const ws2WithMissingInj = createWorkspace('ws2WithMissingInj', [], {
+      input1: { workspace: 'ws1', key: 'missing' },
+    })
+    const inputs = await ctx.getInputs(ws2WithMissingInj, { bestEffort: true })
+    expect(inputs).toEqual({ input1: { value: '', secret: false } })
+  })
+
   it('should store applied workspace', () => {
     ctx.storeWorkspaceOutputs(ws2, { out2: { value: 'val2', secret: false } })
     expect(ctx.workspaceOutputs).toHaveLength(2)
