@@ -1,5 +1,18 @@
 # @krafteq/infraglue
 
+## 0.4.0
+
+### Minor Changes
+
+- e5b81c4: Add `skip_preview` workspace config to bypass preview/plan on initial deploy. Useful for Pulumi workspaces that connect to services not yet deployed.
+
+### Patch Changes
+
+- e5b81c4: Update SKILL.md with agent usage guidance, secret injection docs, skip_preview docs, and troubleshooting improvements
+- e5b81c4: Use placeholder inputs during destroy when upstream workspace outputs are unavailable
+- e5b81c4: Fix `--` separator in `pulumi config set` to handle dash-prefixed values correctly
+- e5b81c4: Expand tilde in Pulumi `file://` backend URLs to prevent literal `~` directories being created
+
 ## 0.3.0
 
 ### Minor Changes
