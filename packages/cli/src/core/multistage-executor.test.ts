@@ -4,6 +4,7 @@ import {
   type IExecOptions,
   type IPlanExecOptions,
   type IDriftOptions,
+  hasOutputDiff,
 } from './multistage-executor.js'
 import { ExecutionContext, Monorepo, Workspace, AppliedWorkspace } from './model.js'
 import { MockProvider, createProviderPlan } from '../__test-utils__/mock-provider.js'
@@ -161,6 +162,33 @@ describe('MultistageExecutor', () => {
       await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
 
       expect(ctx.findAppliedOutput('ws1', 'key')).toEqual({ value: 'applied-value', secret: false })
+    })
+
+    it('should skip preview and apply directly when skipPreview is true', async () => {
+      envSelected()
+      const ws1 = new Workspace(
+        'ws1',
+        '/path/to/ws1',
+        '/root',
+        createMockProvider(),
+        {},
+        [],
+        { dev: {} },
+        {},
+        true, // skipPreview
+      )
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockApply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      // getPlan should not be called (preview is skipped)
+      expect(mockGetPlan).not.toHaveBeenCalled()
+      // apply should be called
+      expect(mockApply).toHaveBeenCalledOnce()
     })
 
     it('should skip and cache outputs when no changes', async () => {
@@ -354,6 +382,42 @@ describe('MultistageExecutor', () => {
       expect(mockIsDestroyed).toHaveBeenCalledTimes(3)
       expect(mockDestroyPlan).not.toHaveBeenCalled()
       expect(mockDestroy).not.toHaveBeenCalled()
+    })
+
+    it('should use placeholder inputs during destroy when upstream outputs are unavailable', async () => {
+      envSelected()
+      const wsNetwork = createWs('ws1')
+      const wsDb = new Workspace(
+        'ws2',
+        '/path/to/ws2',
+        '/root',
+        createMockProvider(),
+        { network_name: { workspace: 'ws1', key: 'network_name' } },
+        ['ws1'],
+        { dev: {} },
+      )
+      const monorepo = new Monorepo('/root', [wsNetwork, wsDb], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      // ws2 (destroyed first in reverse order) is not destroyed yet
+      // ws1 (destroyed second) is already destroyed — its outputs won't be available
+      let isDestroyedCallCount = 0
+      mockIsDestroyed.mockImplementation(async () => {
+        isDestroyedCallCount++
+        return false
+      })
+      mockDestroyPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 0, change: 0, remove: 1, replace: 0, outputUpdates: 0 } }),
+      )
+      mockDestroy.mockResolvedValue(undefined)
+      // getOutputs will throw for ws1 (already destroyed)
+      mockGetOutputs.mockRejectedValue(new Error('no outputs available'))
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      // Both workspaces should have been destroyed (ws2 first, then ws1)
+      expect(mockDestroy).toHaveBeenCalledTimes(2)
     })
 
     it('should remove outputs for destroyed workspace', async () => {
@@ -588,6 +652,53 @@ describe('MultistageExecutor', () => {
       await executor.plan({ formatter: createFormatter(), detailed: true })
 
       expect(mockGetPlan).toHaveBeenCalledWith(expect.anything(), { detailed: true })
+    })
+
+    it('should detect output-only changes by comparing plan outputs against cached state', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      // Plan has no resource changes but outputs differ from cached
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({
+          outputs: [{ name: 'url', value: 'http://new-url', sensitive: false, description: null }],
+        }),
+      )
+      // Cached outputs have a different value
+      mockGetOutputs.mockResolvedValue({
+        outputs: { url: { value: 'http://old-url', secret: false } },
+        actual: true,
+      })
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(true)
+    })
+
+    it('should not detect output-only changes when plan outputs match cached state', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      // Plan has no resource changes and outputs match cached
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({
+          outputs: [{ name: 'url', value: 'http://same-url', sensitive: false, description: null }],
+        }),
+      )
+      mockGetOutputs.mockResolvedValue({
+        outputs: { url: { value: 'http://same-url', secret: false } },
+        actual: true,
+      })
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(false)
     })
 
     it('should validate env the same as exec', async () => {
@@ -1010,5 +1121,47 @@ describe('MultistageExecutor', () => {
         'Cannot execute: environments across workspaces are in inconsistent state',
       )
     })
+  })
+})
+
+describe('hasOutputDiff', () => {
+  it('should return false when plan outputs match cached outputs', () => {
+    const planOutputs = [{ name: 'url', value: 'http://localhost', sensitive: false, description: null }]
+    const cachedOutputs = { url: { value: 'http://localhost', secret: false } }
+    expect(hasOutputDiff(planOutputs, cachedOutputs)).toBe(false)
+  })
+
+  it('should return true when plan has a new output', () => {
+    const planOutputs = [
+      { name: 'url', value: 'http://localhost', sensitive: false, description: null },
+      { name: 'port', value: '3000', sensitive: false, description: null },
+    ]
+    const cachedOutputs = { url: { value: 'http://localhost', secret: false } }
+    expect(hasOutputDiff(planOutputs, cachedOutputs)).toBe(true)
+  })
+
+  it('should return true when plan output value differs from cached', () => {
+    const planOutputs = [{ name: 'url', value: 'http://new-url', sensitive: false, description: null }]
+    const cachedOutputs = { url: { value: 'http://old-url', secret: false } }
+    expect(hasOutputDiff(planOutputs, cachedOutputs)).toBe(true)
+  })
+
+  it('should return false when plan has no outputs (cannot detect diff)', () => {
+    const planOutputs: { name: string; value: string; sensitive: boolean; description: null }[] = []
+    const cachedOutputs = { url: { value: 'http://localhost', secret: false } }
+    expect(hasOutputDiff(planOutputs, cachedOutputs)).toBe(false)
+  })
+
+  it('should return true when cached has an output removed in plan', () => {
+    const planOutputs = [{ name: 'port', value: '3000', sensitive: false, description: null }]
+    const cachedOutputs = {
+      port: { value: '3000', secret: false },
+      url: { value: 'http://localhost', secret: false },
+    }
+    expect(hasOutputDiff(planOutputs, cachedOutputs)).toBe(true)
+  })
+
+  it('should return false when both are empty', () => {
+    expect(hasOutputDiff([], {})).toBe(false)
   })
 })
