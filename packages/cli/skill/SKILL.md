@@ -93,14 +93,15 @@ envs: # per-environment configuration
 
 ### Fields
 
-| Field        | Type                        | Required | Description                                                                                  |
-| ------------ | --------------------------- | -------- | -------------------------------------------------------------------------------------------- |
-| `provider`   | `string`                    | No       | `terraform` or `pulumi`. Auto-detected if omitted (from `.tf` or `Pulumi.yaml` files)        |
-| `injection`  | `Record<string, string>`    | No       | Map of variable names to `'../workspace:output_key'` references. Creates implicit dependency |
-| `depends_on` | `string[]`                  | No       | Explicit dependencies without output injection. Use relative paths like `'../workspace'`     |
-| `alias`      | `string`                    | No       | Custom workspace name (defaults to directory name)                                           |
-| `output`     | `Record<string, string>`    | No       | Remap provider output keys to different names                                                |
-| `envs`       | `Record<string, EnvConfig>` | No       | Per-environment configuration (see below)                                                    |
+| Field          | Type                        | Required | Description                                                                                                                               |
+| -------------- | --------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`     | `string`                    | No       | `terraform` or `pulumi`. Auto-detected if omitted (from `.tf` or `Pulumi.yaml` files)                                                     |
+| `injection`    | `Record<string, string>`    | No       | Map of variable names to `'../workspace:output_key'` references. Creates implicit dependency                                              |
+| `depends_on`   | `string[]`                  | No       | Explicit dependencies without output injection. Use relative paths like `'../workspace'`                                                  |
+| `alias`        | `string`                    | No       | Custom workspace name (defaults to directory name)                                                                                        |
+| `output`       | `Record<string, string>`    | No       | Remap provider output keys to different names                                                                                             |
+| `envs`         | `Record<string, EnvConfig>` | No       | Per-environment configuration (see below)                                                                                                 |
+| `skip_preview` | `boolean`                   | No       | Skip preview/plan and apply directly. Use for Pulumi providers that can't preview before first deploy (see [Skip Preview](#skip-preview)) |
 
 ### Environment Config (EnvConfig)
 
@@ -168,6 +169,7 @@ This means: "take the `network_name` output from the `docker-network` workspace 
 - The path is relative to the current workspace directory
 - `injection` creates an implicit dependency (no need to also list in `depends_on`)
 - `depends_on` is for ordering without data flow
+- Secret values from upstream workspaces are auto-detected and injected with `--secret` (Pulumi) or as `sensitive` (Terraform). No manual secret marking needed (requires ig `>=0.2.1`)
 
 ## CLI Commands
 
@@ -197,7 +199,7 @@ ig env current                        # show current environment
 ig config show                        # display parsed monorepo config
 ig config show --json                 # JSON output for scripting
 
-# Provider passthrough
+# Provider passthrough (stdout/stderr are passed through directly via stdio: inherit)
 ig provider plan                      # run provider CLI command in current workspace dir
 ig provider output -json              # get raw provider outputs
 
@@ -323,13 +325,40 @@ If `provider` is not set in a workspace's `ig.yaml`, ig detects it automatically
 
 The selected environment is stored in `.ig/.env` at the monorepo root. This file is created by `ig env select` and persists across commands. Pass `--env` to override without changing the stored selection.
 
+## Skip Preview
+
+Set `skip_preview: true` in a workspace's `ig.yaml` to bypass the preview/plan step and apply directly. This is useful for Pulumi workspaces that use providers connecting to services not yet deployed (e.g., a Pulumi program that configures a database created by another workspace — the preview would fail because the database doesn't exist yet).
+
+```yaml
+skip_preview: true
+
+envs:
+  dev:
+    backend_config:
+      PULUMI_BACKEND_URL: file://./state
+      PULUMI_CONFIG_PASSPHRASE: ''
+```
+
+When `skip_preview` is enabled:
+
+- `ig plan` skips the workspace entirely (no preview is run)
+- `ig apply` applies without running a preview first (Pulumi: `pulumi up --yes --skip-preview`)
+- `ig destroy` is unaffected (destroy preview still runs)
+- The workspace still participates in dependency resolution and output injection
+
+## Output-Only Change Detection
+
+When `ig plan` or `ig apply` detects no resource changes in a workspace, it compares the plan's outputs against cached state outputs. If outputs differ (new exports added, values changed, or exports removed), the workspace is included in the plan instead of being skipped. This is particularly useful for Pulumi workspaces where output-only changes (e.g., adding a new `pulumi.export()`) don't appear as resource changes in the preview.
+
 ## Troubleshooting
 
-| Error                                 | Cause                                        | Fix                                                               |
-| ------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------- |
-| `Monorepo not found in <dir>`         | No `ig.yaml` with `workspace` field found    | Ensure root `ig.yaml` exists with `workspace` globs               |
-| `No environment selected`             | No env stored and no `--env` flag            | Run `ig env select <env>` or pass `--env`                         |
-| `Single workspace is required`        | `provider` command run from monorepo root    | `cd` into a workspace dir or pass `--project`                     |
-| Workspace not discovered              | Directory doesn't match any `workspace` glob | Check glob patterns in root `ig.yaml`                             |
-| Provider not detected                 | No `.tf` or `Pulumi.yaml` files in workspace | Add IaC files or set `provider` explicitly in workspace `ig.yaml` |
-| `Environment variable 'X' is not set` | `${X}` used in config but `X` is not in env  | Set the env var or use `$${X}` to escape as literal               |
+| Error                                    | Cause                                                | Fix                                                                                                                            |
+| ---------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `Monorepo not found in <dir>`            | No `ig.yaml` with `workspace` field found            | Ensure root `ig.yaml` exists with `workspace` globs                                                                            |
+| `No environment selected`                | No env stored and no `--env` flag                    | Run `ig env select <env>` or pass `--env`                                                                                      |
+| `Single workspace is required`           | `provider` command run from monorepo root            | `cd` into a workspace dir or pass `--project`                                                                                  |
+| Workspace not discovered                 | Directory doesn't match any `workspace` glob         | Check glob patterns in root `ig.yaml`                                                                                          |
+| Provider not detected                    | No `.tf` or `Pulumi.yaml` files in workspace         | Add IaC files or set `provider` explicitly in workspace `ig.yaml`                                                              |
+| `Environment variable 'X' is not set`    | `${X}` used in config but `X` is not in env          | Set the env var or use `$${X}` to escape as literal                                                                            |
+| Provider state locked after failed apply | A previous `ig apply` or `ig destroy` failed mid-run | Run `ig provider force-unlock <lock-id>` in each failed workspace, or `pulumi cancel` for Pulumi                               |
+| Destroy fails with missing upstream      | Upstream workspace already destroyed in a prior run  | ig `>=0.3.0` handles this automatically with placeholder inputs. On older versions, re-apply upstream first or use `--no-deps` |
