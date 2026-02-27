@@ -1,4 +1,4 @@
-import { parsePulumiPreviewOutput } from './pulumi-provider.js'
+import { parsePulumiPreviewOutput, resolveFileBackendPath } from './pulumi-provider.js'
 import { hasChanges } from './provider-plan.js'
 import {
   PULUMI_PREVIEW_CREATE,
@@ -11,7 +11,7 @@ import {
 } from '../__test-utils__/provider-fixtures.js'
 import { mkdtemp, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
-import { tmpdir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { pulumiProvider } from './pulumi-provider.js'
 
 describe('parsePulumiPreviewOutput', () => {
@@ -150,6 +150,26 @@ describe('parsePulumiPreviewOutput — drift detection', () => {
 
     expect(hasChanges(plan)).toBe(false)
     expect(plan.changeSummary).toMatchObject({ add: 0, change: 0, remove: 0, replace: 0 })
+  })
+})
+
+describe('resolveFileBackendPath', () => {
+  const rootPath = '/workspace/myproject'
+
+  it('should expand file://~ to homedir', () => {
+    expect(resolveFileBackendPath(rootPath, 'file://~')).toBe(homedir())
+  })
+
+  it('should expand file://~/custom-state to homedir/custom-state', () => {
+    expect(resolveFileBackendPath(rootPath, 'file://~/custom-state')).toBe(join(homedir(), 'custom-state'))
+  })
+
+  it('should resolve file://./state relative to rootPath', () => {
+    expect(resolveFileBackendPath(rootPath, 'file://./state')).toBe(join(rootPath, 'state'))
+  })
+
+  it('should use absolute path directly for file:///absolute/path', () => {
+    expect(resolveFileBackendPath(rootPath, 'file:///absolute/path')).toBe('/absolute/path')
   })
 })
 
