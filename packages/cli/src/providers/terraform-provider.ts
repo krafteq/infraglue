@@ -5,9 +5,10 @@ import { readdir, readFile, copyFile, rm, access, constants, writeFile } from 'f
 import type { IProvider, ProviderConfig } from './provider.js'
 import type { ProviderInput, ProviderOutput, OutputValue } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provider-plan.js'
-import { logger, UserError, ProviderError } from '../utils/index.js'
+import { logger, UserError, ProviderError, formatProviderErrorMessage } from '../utils/index.js'
 import { StateManager } from '../core/index.js'
 import { spawn } from 'node:child_process'
+import { extractTerraformDiagnostics } from './diagnostic-extraction.js'
 
 const execAsync = promisify(exec)
 const spawnAsync = promisify(spawn)
@@ -276,15 +277,9 @@ class TerraformProvider implements IProvider {
         logger.debug(
           `[terraform] exec failed: ${command}\n  cwd: ${configuration.rootPath}\n  code: ${err.code}\n  stderr:\n${err.stderr}\n  stdout (raw):\n${err.stdout}`,
         )
-        const messageParts = [
-          `Terraform command failed in ${configuration.alias}:`,
-          `Command: ${command}`,
-          `Error message: ${error.message}`,
-          `Error code: ${err.code}`,
-          `Error stderr: ${err.stderr}`,
-          `Error stdout: ${err.stdout}`,
-        ]
-        throw new ProviderError(messageParts.join('\n\t'), 'terraform', configuration.alias)
+        const diagnostics = extractTerraformDiagnostics(err.stdout ?? '', err.stderr ?? '')
+        const message = formatProviderErrorMessage('Terraform', configuration.alias, diagnostics, command)
+        throw new ProviderError(message, 'terraform', configuration.alias, { diagnostics, command })
       }
       throw error
     }

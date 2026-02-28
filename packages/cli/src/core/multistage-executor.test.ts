@@ -8,6 +8,13 @@ import {
 } from './multistage-executor.js'
 import { ExecutionContext, Monorepo, Workspace, AppliedWorkspace } from './model.js'
 import { MockProvider, createProviderPlan } from '../__test-utils__/mock-provider.js'
+import { ProviderError, formatProviderErrorMessage } from '../utils/index.js'
+import { extractTerraformDiagnostics, extractPulumiDiagnostics } from '../providers/diagnostic-extraction.js'
+import {
+  TERRAFORM_ERROR_OUTPUT,
+  TERRAFORM_ERROR_WITH_WARNINGS,
+  PULUMI_ERROR_BLOB,
+} from '../__test-utils__/provider-fixtures.js'
 import { State } from './state-manager.js'
 import type { IIntegration } from '../integrations/integration.js'
 import type { IFormatter } from '../formatters/formatter.js'
@@ -514,6 +521,118 @@ describe('MultistageExecutor', () => {
       await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
 
       expect(mockApply).toHaveBeenCalledTimes(2)
+    })
+
+    describe('ProviderError diagnostic output', () => {
+      let stderrSpy: ReturnType<typeof vi.spyOn>
+
+      beforeEach(() => {
+        stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+      })
+
+      afterEach(() => {
+        stderrSpy.mockRestore()
+      })
+
+      function capturedOutput(): string {
+        return stderrSpy.mock.calls.map((call) => String(call[0])).join('')
+      }
+
+      it('should log clean Terraform diagnostic on apply failure', async () => {
+        envSelected()
+        const ws1 = createWs('ws1')
+        const monorepo = new Monorepo('/root', [ws1], [], undefined)
+        const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+        const executor = new MultistageExecutor(ctx)
+
+        mockGetPlan.mockResolvedValue(
+          createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+        )
+
+        const diagnostics = extractTerraformDiagnostics(TERRAFORM_ERROR_OUTPUT, '')
+        const message = formatProviderErrorMessage('Terraform', 'ws1', diagnostics, 'terraform apply --json')
+        mockApply.mockRejectedValue(new ProviderError(message, 'terraform', 'ws1', { diagnostics }))
+
+        await expect(
+          executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+        ).rejects.toThrow('Failed to apply workspaces')
+
+        const output = capturedOutput()
+        expect(output).toContain('\u2718 error creating S3 Bucket: BucketAlreadyExists (aws_s3_bucket.main)')
+        expect(output).toContain('Run with -v')
+        expect(output).not.toContain('"type":"diagnostic"')
+      })
+
+      it('should log clean Pulumi diagnostic on apply failure', async () => {
+        envSelected()
+        const ws1 = createWs('ws1')
+        const monorepo = new Monorepo('/root', [ws1], [], undefined)
+        const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+        const executor = new MultistageExecutor(ctx)
+
+        mockGetPlan.mockResolvedValue(
+          createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+        )
+
+        const diagnostics = extractPulumiDiagnostics(PULUMI_ERROR_BLOB, '')
+        const message = formatProviderErrorMessage('Pulumi', 'ws1', diagnostics, 'pulumi up --yes')
+        mockApply.mockRejectedValue(new ProviderError(message, 'pulumi', 'ws1', { diagnostics }))
+
+        await expect(
+          executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+        ).rejects.toThrow('Failed to apply workspaces')
+
+        const output = capturedOutput()
+        expect(output).toContain('\u2718 error creating S3 Bucket: BucketAlreadyExists')
+        expect(output).toContain('Run with -v')
+      })
+
+      it('should show only errors when mixed severities exist', async () => {
+        envSelected()
+        const ws1 = createWs('ws1')
+        const monorepo = new Monorepo('/root', [ws1], [], undefined)
+        const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+        const executor = new MultistageExecutor(ctx)
+
+        mockGetPlan.mockResolvedValue(
+          createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+        )
+
+        const diagnostics = extractTerraformDiagnostics(TERRAFORM_ERROR_WITH_WARNINGS, '')
+        const message = formatProviderErrorMessage('Terraform', 'ws1', diagnostics, 'terraform destroy --json')
+        mockApply.mockRejectedValue(new ProviderError(message, 'terraform', 'ws1', { diagnostics }))
+
+        await expect(
+          executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+        ).rejects.toThrow('Failed to apply workspaces')
+
+        const output = capturedOutput()
+        expect(output).toContain('\u2718 error creating S3 Bucket: BucketAlreadyExists')
+        expect(output).not.toContain('Deprecated attribute')
+      })
+
+      it('should show command fallback when no diagnostics', async () => {
+        envSelected()
+        const ws1 = createWs('ws1')
+        const monorepo = new Monorepo('/root', [ws1], [], undefined)
+        const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+        const executor = new MultistageExecutor(ctx)
+
+        mockGetPlan.mockResolvedValue(
+          createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+        )
+
+        const message = formatProviderErrorMessage('Terraform', 'ws1', [], 'terraform apply --json')
+        mockApply.mockRejectedValue(new ProviderError(message, 'terraform', 'ws1', { diagnostics: [] }))
+
+        await expect(
+          executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+        ).rejects.toThrow('Failed to apply workspaces')
+
+        const output = capturedOutput()
+        expect(output).toContain('Command: terraform apply --json')
+        expect(output).toContain('Run with -v')
+      })
     })
   })
 

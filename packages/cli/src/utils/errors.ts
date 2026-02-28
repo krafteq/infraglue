@@ -1,3 +1,5 @@
+import type { Diagnostic } from '../providers/provider-plan.js'
+
 export class IgError extends Error {
   constructor(
     message: string,
@@ -16,14 +18,45 @@ export class UserError extends IgError {
 }
 
 export class ProviderError extends IgError {
+  public readonly diagnostics: Diagnostic[]
+  public readonly command: string | undefined
+
   constructor(
     message: string,
     public readonly provider: string,
     public readonly workspace: string,
+    options?: { diagnostics?: Diagnostic[]; command?: string },
   ) {
     super(message, 3)
     this.name = 'ProviderError'
+    this.diagnostics = options?.diagnostics ?? []
+    this.command = options?.command
   }
+}
+
+export function formatProviderErrorMessage(
+  providerName: string,
+  workspace: string,
+  diagnostics: Diagnostic[],
+  command?: string,
+): string {
+  const lines: string[] = [`${providerName} command failed in ${workspace}`]
+
+  const errors = diagnostics.filter((d) => d.severity === 'error')
+  const toShow = errors.length > 0 ? errors : diagnostics
+
+  if (toShow.length > 0) {
+    for (const d of toShow) {
+      const icon = d.severity === 'error' ? '\u2718' : d.severity === 'warning' ? '\u26A0' : '\u2139'
+      const addr = d.address ? ` (${d.address})` : ''
+      lines.push(`${icon} ${d.summary}${addr}`)
+    }
+  } else if (command) {
+    lines.push(`Command: ${command}`)
+  }
+
+  lines.push('Run with -v for full provider output')
+  return lines.join('\n')
 }
 
 export class ConfigError extends UserError {

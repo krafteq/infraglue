@@ -134,6 +134,25 @@ export class MultistageExecutor {
     }
   }
 
+  private handleLevelFailures(results: PromiseSettledResult<Workspace>[], levelPlans: LevelPlanEntry[]): void {
+    const failures = results
+      .map((r, i) => ({ result: r, workspace: levelPlans[i].workspace }))
+      .filter((x): x is { result: PromiseRejectedResult; workspace: Workspace } => x.result.status === 'rejected')
+
+    if (failures.length > 0) {
+      const failedNames = failures.map((f) => f.workspace.name)
+      const action = this.ctx.isDestroy ? 'destroy' : 'apply'
+      for (const { workspace, result } of failures) {
+        const reason = result.reason instanceof Error ? result.reason.message : String(result.reason)
+        logger.error(`   Failed to ${action} ${workspace.name}:\n${reason}`)
+      }
+      throw new UserError(
+        `Failed to ${action} workspaces: ${failedNames.join(', ')}. ` +
+          `If provider state is locked, run 'ig provider force-unlock <lock-id>' in each failed workspace.`,
+      )
+    }
+  }
+
   public async plan(opts: IPlanExecOptions): Promise<PlanResult> {
     await this.validateEnv()
 
@@ -270,21 +289,7 @@ export class MultistageExecutor {
         }),
       )
 
-      const failures = results
-        .map((r, i) => ({ result: r, workspace: levelPlans[i].workspace }))
-        .filter((x): x is { result: PromiseRejectedResult; workspace: Workspace } => x.result.status === 'rejected')
-
-      if (failures.length > 0) {
-        const failedNames = failures.map((f) => f.workspace.name)
-        const action = this.ctx.isDestroy ? 'destroy' : 'apply'
-        for (const { workspace, result } of failures) {
-          logger.error(`   Failed to ${action} ${workspace.name}: ${result.reason}`)
-        }
-        throw new UserError(
-          `Failed to ${action} workspaces: ${failedNames.join(', ')}. ` +
-            `If provider state is locked, run 'ig provider force-unlock <lock-id>' in each failed workspace.`,
-        )
-      }
+      this.handleLevelFailures(results, levelPlans)
 
       logger.info(`✅ Level ${levelIndex + 1} completed`)
     }

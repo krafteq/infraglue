@@ -7,8 +7,9 @@ import type { ProviderConfig, ProviderInput, ProviderOutput, OutputValue } from 
 import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary, ChangeAction } from './provider-plan.js'
 import type { IProvider } from './provider.js'
 import type { ExecOptions } from 'node:child_process'
-import { logger, UserError, ProviderError } from '../utils/index.js'
+import { logger, UserError, ProviderError, formatProviderErrorMessage } from '../utils/index.js'
 import { mkdir } from 'fs/promises'
+import { extractPulumiDiagnostics } from './diagnostic-extraction.js'
 
 const execAsync = promisify(exec)
 const spawnAsync = promisify(spawn)
@@ -262,15 +263,9 @@ class PulumiProvider implements IProvider {
         logger.debug(
           `[pulumi] exec failed: ${command}\n  cwd: ${configuration.rootPath}\n  code: ${err.code}\n  stderr:\n${err.stderr}\n  stdout (raw):\n${err.stdout}`,
         )
-        const messageParts = [
-          `Pulumi command failed in ${configuration.alias}:`,
-          `Command: ${command}`,
-          `Error message: ${error.message}`,
-          `Error code: ${err.code}`,
-          `Error stderr: ${err.stderr}`,
-          `Error stdout: ${err.stdout}`,
-        ]
-        throw new ProviderError(messageParts.join('\n\t'), 'pulumi', configuration.alias)
+        const diagnostics = extractPulumiDiagnostics(err.stdout ?? '', err.stderr ?? '')
+        const message = formatProviderErrorMessage('Pulumi', configuration.alias, diagnostics, command)
+        throw new ProviderError(message, 'pulumi', configuration.alias, { diagnostics, command })
       }
       throw error
     }

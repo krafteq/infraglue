@@ -4,6 +4,7 @@ import { terraformProvider } from './terraform-provider.js'
 
 export * from './pulumi-provider.js'
 export * from './terraform-provider.js'
+export * from './diagnostic-extraction.js'
 export * from './provider.js'
 export * from './provider-plan.js'
 

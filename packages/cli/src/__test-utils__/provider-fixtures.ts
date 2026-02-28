@@ -229,3 +229,45 @@ export const PULUMI_DRIFT_NONE = JSON.stringify({
     },
   ],
 })
+
+// Error output fixtures
+
+export const TERRAFORM_ERROR_OUTPUT = [
+  '{"@level":"info","type":"planned_change","change":{"resource":{"addr":"aws_s3_bucket.main","module":"","resource":"aws_s3_bucket.main","resource_type":"aws_s3_bucket","resource_name":"main","resource_key":null},"action":"create","before":null,"after":{"bucket":"my-bucket"}}}',
+  '{"@level":"error","type":"diagnostic","diagnostic":{"severity":"error","summary":"error creating S3 Bucket: BucketAlreadyExists","detail":"The requested bucket name is not available.","address":"aws_s3_bucket.main"}}',
+].join('\n')
+
+export const TERRAFORM_ERROR_WITH_WARNINGS = [
+  '{"@level":"warn","type":"diagnostic","diagnostic":{"severity":"warning","summary":"Deprecated attribute","detail":"The attribute \\"foo\\" is deprecated.","address":"aws_instance.web"}}',
+  '{"@level":"error","type":"diagnostic","diagnostic":{"severity":"error","summary":"error creating S3 Bucket: BucketAlreadyExists","detail":"The requested bucket name is not available.","address":"aws_s3_bucket.main"}}',
+  '{"@level":"error","type":"diagnostic","diagnostic":{"severity":"error","summary":"failed to create container: image not found","detail":"","address":null}}',
+].join('\n')
+
+export const TERRAFORM_ERROR_NO_DIAGNOSTICS = [
+  '{"@level":"info","@message":"Initializing...","type":"init_output"}',
+  '{"@level":"info","@message":"Planning...","type":"log"}',
+].join('\n')
+
+export const PULUMI_ERROR_STREAMING = [
+  '{"sequence":1,"timestamp":"2024-01-15T10:00:00Z","diagnosticEvent":{"severity":"info#err","message":"Updating resources..."}}',
+  '{"sequence":2,"timestamp":"2024-01-15T10:00:01Z","diagnosticEvent":{"severity":"error","message":"error creating S3 Bucket: BucketAlreadyExists"}}',
+  '{"sequence":3,"timestamp":"2024-01-15T10:00:02Z","diagnosticEvent":{"severity":"error","message":"failed to create container: image not found"}}',
+].join('\n')
+
+export const PULUMI_ERROR_BLOB = JSON.stringify({
+  diagnostics: [
+    { severity: 'warning', message: 'Deprecated resource type' },
+    { severity: 'error', message: 'error creating S3 Bucket: BucketAlreadyExists' },
+  ],
+})
+
+export const PULUMI_ERROR_NO_DIAGNOSTICS = JSON.stringify({
+  steps: [],
+})
+
+export const MALFORMED_NDJSON = [
+  '{"@level":"error","type":"diagnostic","diagnostic":{"severity":"error","summary":"real error","detail":"","address":null}}',
+  'this is not json at all',
+  '{"incomplete": true',
+  '{"@level":"info","type":"log","@message":"some log"}',
+].join('\n')
