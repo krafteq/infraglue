@@ -4,7 +4,7 @@ import { spawnWithLineStream } from './spawn-command.js'
 describe('spawnWithLineStream', () => {
   it('captures stdout lines via callback', async () => {
     const lines: string[] = []
-    const result = await spawnWithLineStream('echo -e "line1\\nline2\\nline3"', {
+    const result = await spawnWithLineStream('printf "line1\\nline2\\nline3"', {
       cwd: '/tmp',
       onStdoutLine: (line) => lines.push(line),
     })
