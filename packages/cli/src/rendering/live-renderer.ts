@@ -1,6 +1,6 @@
 import logUpdate from 'log-update'
 import pc from 'picocolors'
-import type { WorkspaceApplyState } from './workspace-state.js'
+import type { WorkspaceApplyState, ResourceState } from './workspace-state.js'
 
 export interface ILiveRenderer {
   addWorkspace(state: WorkspaceApplyState): void
@@ -61,6 +61,8 @@ export class LiveRenderer implements ILiveRenderer {
   }
 }
 
+export const SLOW_RESOURCE_THRESHOLD_SECONDS = 60
+
 export function formatCompactLine(ws: WorkspaceApplyState): string {
   const icon = ws.status === 'complete' ? pc.green('ok') : ws.status === 'failed' ? pc.red('X ') : pc.cyan('* ')
   const name = ws.name.padEnd(16)
@@ -76,7 +78,28 @@ export function formatCompactLine(ws: WorkspaceApplyState): string {
   const current = ws.currentResource
   const currentAction = current ? `${pc.dim(current.action)} ${pc.dim(shortAddress(current.address))}` : ''
 
-  return `  ${icon} ${name} ${progress.padEnd(16)} ${currentAction}  ${pc.dim(elapsed)}`
+  let line = `  ${icon} ${name} ${progress.padEnd(16)} ${currentAction}  ${pc.dim(elapsed)}`
+
+  const slowResources = getSlowResources(ws, current?.address)
+  for (const res of slowResources) {
+    line += `\n       ${pc.dim(res.action)} ${pc.dim(shortAddress(res.address))}  ${pc.yellow(`(${res.elapsedSeconds}s)`)}`
+  }
+
+  return line
+}
+
+export function getSlowResources(ws: WorkspaceApplyState, currentAddress?: string): ResourceState[] {
+  const slow: ResourceState[] = []
+  for (const res of ws.resources.values()) {
+    if (
+      res.status === 'in-progress' &&
+      res.elapsedSeconds >= SLOW_RESOURCE_THRESHOLD_SECONDS &&
+      res.address !== currentAddress
+    ) {
+      slow.push(res)
+    }
+  }
+  return slow
 }
 
 export function formatVerboseBlock(ws: WorkspaceApplyState): string[] {

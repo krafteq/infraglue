@@ -171,31 +171,47 @@ describe('MultistageExecutor', () => {
       expect(ctx.findAppliedOutput('ws1', 'key')).toEqual({ value: 'applied-value', secret: false })
     })
 
-    it('should skip preview and apply directly when skipPreview is true', async () => {
+    it('should skip preview and apply directly when skipPreview option is true', async () => {
       envSelected()
-      const ws1 = new Workspace(
-        'ws1',
-        '/path/to/ws1',
-        '/root',
-        createMockProvider(),
-        {},
-        [],
-        { dev: {} },
-        {},
-        true, // skipPreview
-      )
+      const ws1 = createWs('ws1')
       const monorepo = new Monorepo('/root', [ws1], [], undefined)
       const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
       const executor = new MultistageExecutor(ctx)
 
       mockApply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
 
-      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+      await executor.exec({
+        formatter: createFormatter(),
+        integration: createInteractiveIntegration(),
+        skipPreview: true,
+      })
 
       // getPlan should not be called (preview is skipped)
       expect(mockGetPlan).not.toHaveBeenCalled()
       // apply should be called
       expect(mockApply).toHaveBeenCalledOnce()
+    })
+
+    it('should skip destroy plan when skipPreview option is true', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockIsDestroyed.mockResolvedValue(false)
+      mockDestroy.mockResolvedValue(undefined)
+
+      await executor.exec({
+        formatter: createFormatter(),
+        integration: createInteractiveIntegration(),
+        skipPreview: true,
+      })
+
+      // destroyPlan should not be called (preview is skipped)
+      expect(mockDestroyPlan).not.toHaveBeenCalled()
+      // destroy should be called
+      expect(mockDestroy).toHaveBeenCalledOnce()
     })
 
     it('should skip and cache outputs when no changes', async () => {

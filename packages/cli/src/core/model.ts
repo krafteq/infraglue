@@ -183,7 +183,6 @@ export class Workspace {
     public readonly dependsOn: string[],
     public readonly envs: Record<string, EnvironmentConfig>,
     public readonly rootVars: Record<string, string> = {},
-    public readonly skipPreview: boolean = false,
   ) {
     this.allDependsOn = [
       ...new Set(

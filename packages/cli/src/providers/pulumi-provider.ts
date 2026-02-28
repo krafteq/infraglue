@@ -75,14 +75,20 @@ class PulumiProvider implements IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     env: string,
-    options?: { onEvent?: (event: ProviderEvent) => void },
+    options?: { skipPreview?: boolean; onEvent?: (event: ProviderEvent) => void },
   ): Promise<void> {
     await this.setPulumiConfig(configuration, input, env)
 
+    const skipPreviewFlag = options?.skipPreview ? ' --skip-preview' : ''
     if (options?.onEvent) {
-      await this.execCommandStreaming(`pulumi destroy --yes --json --stack ${env}`, configuration, env, options.onEvent)
+      await this.execCommandStreaming(
+        `pulumi destroy --yes --json --stack ${env}${skipPreviewFlag}`,
+        configuration,
+        env,
+        options.onEvent,
+      )
     } else {
-      await this.execCommand(`pulumi destroy --yes --stack ${env}`, configuration, env)
+      await this.execCommand(`pulumi destroy --yes --stack ${env}${skipPreviewFlag}`, configuration, env)
     }
   }
 

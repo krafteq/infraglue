@@ -87,6 +87,7 @@ interface IApplyOptions {
   approve?: number[] | 'all'
   env: string
   project?: string
+  skipPreview?: boolean
 }
 
 const execCommands = [
@@ -153,19 +154,24 @@ for (const execCmd of execCommands) {
     .option('-p, --project <project>', 'Project to apply')
     .option('-e, --env <env>', 'environment to apply. If provided, the environment will be selected before applying')
     .option('--no-deps', 'Ignore dependencies')
-    .action(async ({ format, integration, approve, env, project, deps }: IApplyOptions & { deps: boolean }) => {
-      const monorepo = requireMonorepo()
-      env = await resolveEnv(env)
+    .option('--skip-preview', 'Skip preview/plan step and apply/destroy directly')
+    .action(
+      async ({ format, integration, approve, env, project, deps, skipPreview }: IApplyOptions & { deps: boolean }) => {
+        const monorepo = requireMonorepo()
+        env = await resolveEnv(env)
 
-      const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, execCmd.isDestroy, env)
+        const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, execCmd.isDestroy, env)
 
-      await new MultistageExecutor(execContext).exec({
-        approve: approve,
-        integration: getIntegration(detectIntegration(integration)),
-        formatter: getFormatter(format),
-        preview: false,
-      })
-    })
+        const execOpts: Parameters<MultistageExecutor['exec']>[0] = {
+          approve: approve,
+          integration: getIntegration(detectIntegration(integration)),
+          formatter: getFormatter(format),
+          preview: false,
+        }
+        if (skipPreview) execOpts.skipPreview = true
+        await new MultistageExecutor(execContext).exec(execOpts)
+      },
+    )
 }
 
 const configCommand = program.command('config')

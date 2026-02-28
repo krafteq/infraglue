@@ -92,7 +92,7 @@ class TerraformProvider implements IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     environment: string,
-    options?: { onEvent?: (event: ProviderEvent) => void },
+    options?: { skipPreview?: boolean; onEvent?: (event: ProviderEvent) => void },
   ): Promise<void> {
     const variables = await this.getVariableString(configuration, input, environment)
 

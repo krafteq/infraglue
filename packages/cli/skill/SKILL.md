@@ -116,15 +116,14 @@ envs: # per-environment configuration
 
 ### Fields
 
-| Field          | Type                        | Required | Description                                                                                                                               |
-| -------------- | --------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `provider`     | `string`                    | No       | `terraform` or `pulumi`. Auto-detected if omitted (from `.tf` or `Pulumi.yaml` files)                                                     |
-| `injection`    | `Record<string, string>`    | No       | Map of variable names to `'../workspace:output_key'` references. Creates implicit dependency                                              |
-| `depends_on`   | `string[]`                  | No       | Explicit dependencies without output injection. Use relative paths like `'../workspace'`                                                  |
-| `alias`        | `string`                    | No       | Custom workspace name (defaults to directory name)                                                                                        |
-| `output`       | `Record<string, string>`    | No       | Remap provider output keys to different names                                                                                             |
-| `envs`         | `Record<string, EnvConfig>` | No       | Per-environment configuration (see below)                                                                                                 |
-| `skip_preview` | `boolean`                   | No       | Skip preview/plan and apply directly. Use for Pulumi providers that can't preview before first deploy (see [Skip Preview](#skip-preview)) |
+| Field        | Type                        | Required | Description                                                                                  |
+| ------------ | --------------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `provider`   | `string`                    | No       | `terraform` or `pulumi`. Auto-detected if omitted (from `.tf` or `Pulumi.yaml` files)        |
+| `injection`  | `Record<string, string>`    | No       | Map of variable names to `'../workspace:output_key'` references. Creates implicit dependency |
+| `depends_on` | `string[]`                  | No       | Explicit dependencies without output injection. Use relative paths like `'../workspace'`     |
+| `alias`      | `string`                    | No       | Custom workspace name (defaults to directory name)                                           |
+| `output`     | `Record<string, string>`    | No       | Remap provider output keys to different names                                                |
+| `envs`       | `Record<string, EnvConfig>` | No       | Per-environment configuration (see below)                                                    |
 
 ### Environment Config (EnvConfig)
 
@@ -365,24 +364,19 @@ The selected environment is stored in `.ig/.env` at the monorepo root. This file
 
 ## Skip Preview
 
-Set `skip_preview: true` in a workspace's `ig.yaml` to bypass the preview/plan step and apply directly. This is useful for Pulumi workspaces that use providers connecting to services not yet deployed (e.g., a Pulumi program that configures a database created by another workspace — the preview would fail because the database doesn't exist yet).
+Pass `--skip-preview` to `ig apply` or `ig destroy` to bypass the preview/plan step and apply/destroy directly. This is useful for Pulumi workspaces that use providers connecting to services not yet deployed (e.g., a Pulumi program that configures a database created by another workspace — the preview would fail because the database doesn't exist yet).
 
-```yaml
-skip_preview: true
-
-envs:
-  dev:
-    backend_config:
-      PULUMI_BACKEND_URL: file://./state
-      PULUMI_CONFIG_PASSPHRASE: ''
+```bash
+ig apply --env dev --skip-preview
+ig destroy --env dev --skip-preview
 ```
 
-When `skip_preview` is enabled:
+When `--skip-preview` is used:
 
-- `ig plan` skips the workspace entirely (no preview is run)
 - `ig apply` applies without running a preview first (Pulumi: `pulumi up --yes --skip-preview`)
-- `ig destroy` is unaffected (destroy preview still runs)
-- The workspace still participates in dependency resolution and output injection
+- `ig destroy` destroys without running a destroy plan first (Pulumi: `pulumi destroy --yes --skip-preview`)
+- All workspaces in the monorepo are affected (it is a global flag, not per-workspace)
+- The `ig plan` command does not accept `--skip-preview` (plan's purpose is preview)
 
 ## Output-Only Change Detection
 

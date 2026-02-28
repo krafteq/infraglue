@@ -63,7 +63,10 @@ export class WorkspaceInterop {
     return this.provider.destroyPlan(this.providerConfig(), input, this.env)
   }
 
-  public destroy(input: ProviderInput, options?: { onEvent?: (event: ProviderEvent) => void }): Promise<void> {
+  public destroy(
+    input: ProviderInput,
+    options?: { skipPreview?: boolean; onEvent?: (event: ProviderEvent) => void },
+  ): Promise<void> {
     return this.provider.destroy(this.providerConfig(), input, this.env, options)
   }
 

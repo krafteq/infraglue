@@ -43,7 +43,10 @@ export class MultistageExecutor {
     }
   }
 
-  private async gatherLevelPlans(workspaces: Workspace[], options?: { detailed?: boolean }): Promise<LevelPlanEntry[]> {
+  private async gatherLevelPlans(
+    workspaces: Workspace[],
+    options?: { detailed?: boolean; skipPreview?: boolean },
+  ): Promise<LevelPlanEntry[]> {
     const levelPlans: LevelPlanEntry[] = []
 
     for (const workspace of workspaces) {
@@ -57,6 +60,23 @@ export class MultistageExecutor {
         }
 
         const inputs: ProviderInput = await this.ctx.getInputs(workspace, { bestEffort: true })
+
+        if (options?.skipPreview) {
+          logger.info(`⏩ ${workspace.name} has --skip-preview, skipping destroy plan`)
+          const syntheticPlan: ProviderPlan = {
+            provider: workspace.providerName,
+            projectName: workspace.name,
+            timestamp: new Date(),
+            resourceChanges: [],
+            outputs: [],
+            diagnostics: [],
+            changeSummary: { add: 0, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+            metadata: { skipPreview: true },
+          }
+          levelPlans.push({ workspace, inputs, plan: syntheticPlan })
+          continue
+        }
+
         const plan = await interop.destroyPlan(inputs)
         if (!hasChanges(plan)) {
           logger.info(`✅ Nothing to destroy in ${workspace.name}`)
@@ -66,8 +86,8 @@ export class MultistageExecutor {
       } else {
         const inputs: ProviderInput = await this.ctx.getInputs(workspace)
 
-        if (workspace.skipPreview) {
-          logger.info(`⏩ ${workspace.name} has skip_preview enabled, skipping plan`)
+        if (options?.skipPreview) {
+          logger.info(`⏩ ${workspace.name} has --skip-preview, skipping plan`)
           const syntheticPlan: ProviderPlan = {
             provider: workspace.providerName,
             projectName: workspace.name,
@@ -234,7 +254,10 @@ export class MultistageExecutor {
       logger.info(`\n🔧 Processing Level ${levelIndex + 1}/${executionPlan.levelsCount}`)
       logger.info('=====================================')
 
-      const levelPlans = await this.gatherLevelPlans(level.workspaces)
+      const levelPlans = await this.gatherLevelPlans(
+        level.workspaces,
+        opts.skipPreview ? { skipPreview: true } : undefined,
+      )
 
       if (levelPlans.length === 0) {
         logger.info('✅ No changes needed in this level')
@@ -303,7 +326,9 @@ export class MultistageExecutor {
 
           if (this.ctx.isDestroy) {
             try {
-              await interop.destroy(inputs, { onEvent })
+              const destroyOpts: { skipPreview?: boolean; onEvent: (event: ProviderEvent) => void } = { onEvent }
+              if (opts.skipPreview) destroyOpts.skipPreview = true
+              await interop.destroy(inputs, destroyOpts)
               wsState.markComplete()
               this.ctx.storeDestroyedWorkspace(workspace)
             } catch (error) {
@@ -314,7 +339,7 @@ export class MultistageExecutor {
           } else {
             try {
               const applyOpts: { skipPreview?: boolean; onEvent: (event: ProviderEvent) => void } = { onEvent }
-              if (workspace.skipPreview) applyOpts.skipPreview = true
+              if (opts.skipPreview) applyOpts.skipPreview = true
               const outputs = await interop.apply(inputs, applyOpts)
               wsState.markComplete()
               this.ctx.storeWorkspaceOutputs(workspace, outputs)
@@ -539,6 +564,7 @@ export interface IExecOptions {
   integration: IIntegration
   approve?: number[] | 'all' | undefined
   preview?: boolean
+  skipPreview?: boolean
 }
 
 export interface IPlanExecOptions {

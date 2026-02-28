@@ -57,7 +57,7 @@ export interface IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     env: string,
-    options?: { onEvent?: (event: ProviderEvent) => void },
+    options?: { skipPreview?: boolean; onEvent?: (event: ProviderEvent) => void },
   ): Promise<void>
   isDestroyed(configuration: ProviderConfig, env: string): Promise<boolean>
 

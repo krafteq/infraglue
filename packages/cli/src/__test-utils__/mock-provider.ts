@@ -51,7 +51,6 @@ export function createWorkspace(
   envs: string[] = ['dev'],
   provider?: IProvider,
   rootVars: Record<string, string> = {},
-  skipPreview: boolean = false,
 ): Workspace {
   const envConfig: Record<string, EnvironmentConfig> = envs.reduce(
     (acc, env) => ({ ...acc, [env]: {} }),
@@ -66,7 +65,6 @@ export function createWorkspace(
     dependsOn,
     envConfig,
     rootVars,
-    skipPreview,
   )
 }
 

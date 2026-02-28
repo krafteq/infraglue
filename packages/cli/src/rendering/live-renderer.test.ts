@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { LiveRenderer, formatCompactLine, formatVerboseBlock } from './live-renderer.js'
+import {
+  LiveRenderer,
+  formatCompactLine,
+  formatVerboseBlock,
+  SLOW_RESOURCE_THRESHOLD_SECONDS,
+} from './live-renderer.js'
 import { WorkspaceApplyState } from './workspace-state.js'
 
 describe('formatCompactLine', () => {
@@ -46,6 +51,127 @@ describe('formatCompactLine', () => {
     expect(line).toContain('postgres')
     expect(line).toContain('failed')
     expect(line).toContain('DBInstanceAlreadyExists')
+  })
+})
+
+describe('formatCompactLine slow resources', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2025-01-01T00:00:00Z'))
+  })
+
+  it('shows slow resource (>=60s) as additional line', () => {
+    const ws = new WorkspaceApplyState('redis')
+    ws.handleEvent({
+      type: 'resource_start',
+      address: 'docker:index:Container',
+      resourceType: 'docker',
+      action: 'creating',
+    })
+    ws.handleEvent({
+      type: 'resource_start',
+      address: 'aws:rds:Instance::database',
+      resourceType: 'aws',
+      action: 'creating',
+    })
+    // Make the second resource slow
+    ws.handleEvent({
+      type: 'resource_progress',
+      address: 'aws:rds:Instance::database',
+      elapsedSeconds: SLOW_RESOURCE_THRESHOLD_SECONDS,
+    })
+
+    const line = formatCompactLine(ws)
+    // Main line shows the first in-progress resource (Container)
+    expect(line).toContain('docker:index:Container')
+    // Slow resource appears as additional line
+    expect(line).toContain('aws:rds:Instance::database')
+    expect(line).toContain(`${SLOW_RESOURCE_THRESHOLD_SECONDS}s`)
+  })
+
+  it('does not show extra lines when all resources are under threshold', () => {
+    const ws = new WorkspaceApplyState('redis')
+    ws.handleEvent({
+      type: 'resource_start',
+      address: 'docker:index:Container',
+      resourceType: 'docker',
+      action: 'creating',
+    })
+    ws.handleEvent({
+      type: 'resource_start',
+      address: 'aws:rds:Instance::database',
+      resourceType: 'aws',
+      action: 'creating',
+    })
+    ws.handleEvent({
+      type: 'resource_progress',
+      address: 'aws:rds:Instance::database',
+      elapsedSeconds: 30,
+    })
+
+    const line = formatCompactLine(ws)
+    // Should be a single line (no newlines)
+    expect(line.split('\n')).toHaveLength(1)
+  })
+
+  it('does not duplicate current resource even if slow', () => {
+    const ws = new WorkspaceApplyState('redis')
+    ws.handleEvent({
+      type: 'resource_start',
+      address: 'docker:index:Container',
+      resourceType: 'docker',
+      action: 'creating',
+    })
+    // Make the current resource slow
+    ws.handleEvent({
+      type: 'resource_progress',
+      address: 'docker:index:Container',
+      elapsedSeconds: 120,
+    })
+
+    const line = formatCompactLine(ws)
+    // Should be a single line — the current resource is already on the main line
+    expect(line.split('\n')).toHaveLength(1)
+    expect(line).toContain('docker:index:Container')
+  })
+
+  it('shows multiple slow resources each on their own line', () => {
+    const ws = new WorkspaceApplyState('infra')
+    ws.handleEvent({
+      type: 'resource_start',
+      address: 'docker:index:Container',
+      resourceType: 'docker',
+      action: 'creating',
+    })
+    ws.handleEvent({
+      type: 'resource_start',
+      address: 'aws:rds:Instance::db1',
+      resourceType: 'aws',
+      action: 'creating',
+    })
+    ws.handleEvent({
+      type: 'resource_start',
+      address: 'aws:rds:Instance::db2',
+      resourceType: 'aws',
+      action: 'creating',
+    })
+    ws.handleEvent({
+      type: 'resource_progress',
+      address: 'aws:rds:Instance::db1',
+      elapsedSeconds: 90,
+    })
+    ws.handleEvent({
+      type: 'resource_progress',
+      address: 'aws:rds:Instance::db2',
+      elapsedSeconds: 75,
+    })
+
+    const line = formatCompactLine(ws)
+    const lines = line.split('\n')
+    // Main line + 2 slow resource lines
+    expect(lines).toHaveLength(3)
+    expect(line).toContain('aws:rds:Instance::db1')
+    expect(line).toContain('aws:rds:Instance::db2')
   })
 })
 

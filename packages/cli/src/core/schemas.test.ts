@@ -64,11 +64,12 @@ describe('workspaceConfigSchema', () => {
     expect(result.depends_on).toEqual(['../network'])
   })
 
-  it('should accept skip_preview boolean', () => {
+  it('should silently ignore unknown fields like skip_preview', () => {
     const result = workspaceConfigSchema.parse({
       skip_preview: true,
     })
-    expect(result.skip_preview).toBe(true)
+    // Zod strips unknown keys by default
+    expect((result as Record<string, unknown>).skip_preview).toBeUndefined()
   })
 
   it('should reject invalid depends_on type', () => {

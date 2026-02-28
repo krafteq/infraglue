@@ -150,6 +150,16 @@ describe('WorkspaceInterop', () => {
     expect(provider.destroy).toHaveBeenCalledOnce()
   })
 
+  it('should pass skipPreview option to provider destroy', async () => {
+    const { provider, interop } = setup()
+    provider.destroy.mockResolvedValue(undefined)
+
+    await interop.destroy({}, { skipPreview: true })
+    expect(provider.destroy).toHaveBeenCalledWith(expect.objectContaining({ alias: 'ws1' }), {}, 'dev', {
+      skipPreview: true,
+    })
+  })
+
   it('should delegate isDestroyed to provider', async () => {
     const { provider, interop } = setup()
     provider.isDestroyed.mockResolvedValue(true)

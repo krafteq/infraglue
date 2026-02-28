@@ -1,4 +1,5 @@
 import type { ProviderPlan, ResourceChange, Diagnostic, ChangeSummary, Output } from '../providers/provider-plan.js'
+import pc from 'picocolors'
 
 // TODO: refactor this.
 
@@ -82,6 +83,8 @@ export class DefaultFormatter {
       }
       if (collapsible) {
         formattedContent = this.wrapAsCollapsibleSection(header, formattedContent)
+      } else {
+        formattedContent = `${header}\n${formattedContent}`
       }
     }
 
@@ -99,6 +102,10 @@ export class DefaultFormatter {
   }
 
   static format(plan: ProviderPlan): string {
+    return this._format(plan, { collapsible: false, diffFormat: false }).text
+  }
+
+  static formatForMarkdown(plan: ProviderPlan): string {
     return this._format(plan).text
   }
 
@@ -228,13 +235,35 @@ export class DefaultFormatter {
         .map((h, index) => {
           if ('hide' in h && (h as { hide?: boolean }).hide) return ''
           const value = obj[h.field] ? String(obj[h.field]) : ''
-          return value.padEnd(finalWidths[index], ' ')
+          const padded = value.padEnd(finalWidths[index], ' ')
+          if (h.field === 'op' && value.trim()) {
+            return this.colorizeOp(value, finalWidths[index])
+          }
+          return padded
         })
         .filter(Boolean)
         .join(' '),
     )
 
     return [headerRow, ...rows].join('\n')
+  }
+
+  /**
+   * Colorize op symbol while preserving column width
+   */
+  private static colorizeOp(op: string, width: number): string {
+    const padding = ' '.repeat(Math.max(0, width - op.length))
+    switch (op.trim()) {
+      case '+':
+        return pc.green(op) + padding
+      case '-':
+        return pc.red(op) + padding
+      case '~':
+      case '+-':
+        return pc.yellow(op) + padding
+      default:
+        return op + padding
+    }
   }
 
   /**
@@ -276,21 +305,21 @@ export class DefaultFormatter {
    */
   private static summaryToText(summary: ChangeSummary, diagnostics: Diagnostic[] = []): string {
     const parts = [
-      summary.add ? `{+ create: ${summary.add} +}` : '',
-      summary.remove ? `{- delete: ${summary.remove} -}` : '',
-      summary.change ? `{+ update: ${summary.change} +}` : '',
-      summary.replace ? `{+- replace: ${summary.replace} +-}` : '',
-      diagnostics.length ? `{- diagnostics: ${diagnostics.length} -}` : '',
+      summary.add ? pc.green(`+${summary.add} create`) : '',
+      summary.remove ? pc.red(`-${summary.remove} delete`) : '',
+      summary.change ? pc.yellow(`~${summary.change} update`) : '',
+      summary.replace ? pc.yellow(`+-${summary.replace} replace`) : '',
+      diagnostics.length ? pc.red(`${diagnostics.length} diagnostics`) : '',
     ].filter(Boolean)
 
-    return parts.join('\n')
+    return parts.join(', ')
   }
 
   /**
    * Convert exit code to text representation
    */
   private static exitCodeToText(exitCode: number): string {
-    return exitCode === 0 ? '' : `{-error (code: ${exitCode}) -}`
+    return exitCode === 0 ? '' : pc.red(`error (code: ${exitCode})`)
   }
 
   /**
