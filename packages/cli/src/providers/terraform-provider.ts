@@ -5,10 +5,13 @@ import { readdir, readFile, copyFile, rm, access, constants, writeFile } from 'f
 import type { IProvider, ProviderConfig } from './provider.js'
 import type { ProviderInput, ProviderOutput, OutputValue } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provider-plan.js'
+import type { ProviderEvent } from './provider-events.js'
 import { logger, UserError, ProviderError, formatProviderErrorMessage } from '../utils/index.js'
 import { StateManager } from '../core/index.js'
 import { spawn } from 'node:child_process'
 import { extractTerraformDiagnostics } from './diagnostic-extraction.js'
+import { spawnWithLineStream } from './spawn-command.js'
+import { parseTerraformStreamLine } from './stream-parser.js'
 
 const execAsync = promisify(exec)
 const spawnAsync = promisify(spawn)
@@ -52,11 +55,19 @@ class TerraformProvider implements IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     environment: string,
-    _options?: { skipPreview?: boolean },
+    options?: { skipPreview?: boolean; onEvent?: (event: ProviderEvent) => void },
   ): Promise<ProviderOutput> {
     const variables = await this.getVariableString(configuration, input, environment)
 
-    await this.execCommand(`terraform apply --auto-approve --json ${variables}`, configuration)
+    if (options?.onEvent) {
+      await this.execCommandStreaming(
+        `terraform apply --auto-approve --json ${variables}`,
+        configuration,
+        options.onEvent,
+      )
+    } else {
+      await this.execCommand(`terraform apply --auto-approve --json ${variables}`, configuration)
+    }
 
     const stdout = await this.execCommand(`terraform output --json`, configuration)
 
@@ -77,10 +88,23 @@ class TerraformProvider implements IProvider {
     return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
   }
 
-  async destroy(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<void> {
+  async destroy(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    environment: string,
+    options?: { onEvent?: (event: ProviderEvent) => void },
+  ): Promise<void> {
     const variables = await this.getVariableString(configuration, input, environment)
 
-    await this.execCommand(`terraform destroy --auto-approve ${variables}`, configuration)
+    if (options?.onEvent) {
+      await this.execCommandStreaming(
+        `terraform destroy --auto-approve --json ${variables}`,
+        configuration,
+        options.onEvent,
+      )
+    } else {
+      await this.execCommand(`terraform destroy --auto-approve ${variables}`, configuration)
+    }
   }
 
   async isDestroyed(configuration: ProviderConfig): Promise<boolean> {
@@ -256,6 +280,32 @@ class TerraformProvider implements IProvider {
       stdio: 'inherit',
       cwd: configuration.rootPath,
     })
+  }
+
+  private async execCommandStreaming(
+    command: string,
+    configuration: ProviderConfig,
+    onEvent: (event: ProviderEvent) => void,
+  ): Promise<string> {
+    logger.debug(`[terraform] exec (streaming): ${command}\n  cwd: ${configuration.rootPath}`)
+    const result = await spawnWithLineStream(command, {
+      cwd: configuration.rootPath,
+      onStdoutLine: (line) => {
+        const event = parseTerraformStreamLine(line)
+        if (event) onEvent(event)
+      },
+      onStderrLine: (line) => {
+        logger.debug(`[terraform] stderr: ${line}`)
+      },
+    })
+
+    if (result.exitCode !== 0) {
+      const diagnostics = extractTerraformDiagnostics(result.stdout, '')
+      const message = formatProviderErrorMessage('Terraform', configuration.alias, diagnostics, command)
+      throw new ProviderError(message, 'terraform', configuration.alias, { diagnostics, command })
+    }
+
+    return result.stdout
   }
 
   private async execCommand(command: string, configuration: ProviderConfig): Promise<string> {

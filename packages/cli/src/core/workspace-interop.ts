@@ -1,5 +1,12 @@
 import { type Monorepo, Workspace } from './model.js'
-import type { IProvider, ProviderConfig, ProviderInput, ProviderOutput, ProviderPlan } from '../providers/index.js'
+import type {
+  IProvider,
+  ProviderConfig,
+  ProviderInput,
+  ProviderOutput,
+  ProviderPlan,
+  ProviderEvent,
+} from '../providers/index.js'
 import { StateManager } from './state-manager.js'
 import { logger } from '../utils/index.js'
 import { globalConfig } from './global-config.js'
@@ -43,7 +50,10 @@ export class WorkspaceInterop {
     return this.provider.getPlan(this.providerConfig(), input, this.env, options)
   }
 
-  public async apply(input: ProviderInput, options?: { skipPreview?: boolean }): Promise<ProviderOutput> {
+  public async apply(
+    input: ProviderInput,
+    options?: { skipPreview?: boolean; onEvent?: (event: ProviderEvent) => void },
+  ): Promise<ProviderOutput> {
     const outputs = await this.provider.apply(this.providerConfig(), input, this.env, options)
     await this.storeOutputs(outputs)
     return outputs
@@ -53,8 +63,8 @@ export class WorkspaceInterop {
     return this.provider.destroyPlan(this.providerConfig(), input, this.env)
   }
 
-  public destroy(input: ProviderInput): Promise<void> {
-    return this.provider.destroy(this.providerConfig(), input, this.env)
+  public destroy(input: ProviderInput, options?: { onEvent?: (event: ProviderEvent) => void }): Promise<void> {
+    return this.provider.destroy(this.providerConfig(), input, this.env, options)
   }
 
   public isDestroyed(): Promise<boolean> {

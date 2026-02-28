@@ -254,6 +254,33 @@ Level numbers are 1-indexed. Without `--approve`, the command waits for interact
 
 **TTY detection:** when no TTY is detected (CI, piped output, agent subprocess), ig auto-selects the `no-tty-cli` integration which suppresses interactive prompts. `ig plan` and `ig drift` are always non-interactive.
 
+### Live Progress Display
+
+During `ig apply` and `ig destroy`, ig streams real-time progress from Terraform and Pulumi. Both providers emit NDJSON events when run with `--json`, which ig parses to show per-resource status.
+
+**TTY (default compact view)** — one line per workspace showing resource count, current operation, and elapsed time:
+
+```text
+  ok redis        2/5 resources   creating docker:index:Container  (3s)
+  ok postgres     1/3 resources   creating aws:rds:Instance  (15s)
+```
+
+**TTY verbose (`-v`)** — expanded per-resource detail:
+
+```text
+  * redis
+      ok docker:index:Image         pulled        0.8s
+      *  docker:index:Container     creating...   3s
+```
+
+**Non-TTY/CI** — append-only prefixed lines (no ANSI cursor codes):
+
+```text
+[redis] create docker_network.main
+[redis] create docker_network.main (12s)
+[postgres] error: aws_rds.main - DBInstanceAlreadyExists
+```
+
 ### Global Options
 
 | Option                  | Description                                      |

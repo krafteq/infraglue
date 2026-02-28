@@ -5,11 +5,14 @@ import { homedir } from 'os'
 import { access, constants as fsConstants } from 'fs'
 import type { ProviderConfig, ProviderInput, ProviderOutput, OutputValue } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic, ChangeSummary, ChangeAction } from './provider-plan.js'
+import type { ProviderEvent } from './provider-events.js'
 import type { IProvider } from './provider.js'
 import type { ExecOptions } from 'node:child_process'
 import { logger, UserError, ProviderError, formatProviderErrorMessage } from '../utils/index.js'
 import { mkdir } from 'fs/promises'
 import { extractPulumiDiagnostics } from './diagnostic-extraction.js'
+import { spawnWithLineStream } from './spawn-command.js'
+import { parsePulumiStreamLine } from './stream-parser.js'
 
 const execAsync = promisify(exec)
 const spawnAsync = promisify(spawn)
@@ -37,12 +40,16 @@ class PulumiProvider implements IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     env: string,
-    options?: { skipPreview?: boolean },
+    options?: { skipPreview?: boolean; onEvent?: (event: ProviderEvent) => void },
   ): Promise<ProviderOutput> {
     await this.setPulumiConfig(configuration, input, env)
 
     const skipPreviewFlag = options?.skipPreview ? ' --skip-preview' : ''
-    await this.execCommand(`pulumi up --yes --json${skipPreviewFlag}`, configuration, env)
+    if (options?.onEvent) {
+      await this.execCommandStreaming(`pulumi up --yes --json${skipPreviewFlag}`, configuration, env, options.onEvent)
+    } else {
+      await this.execCommand(`pulumi up --yes --json${skipPreviewFlag}`, configuration, env)
+    }
 
     return this.getOutputsWithSecretDetection(configuration, env)
   }
@@ -64,10 +71,19 @@ class PulumiProvider implements IProvider {
     return this.mapPulumiOutputToProviderPlan(stdout, basename(configuration.rootPath))
   }
 
-  async destroy(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<void> {
+  async destroy(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    env: string,
+    options?: { onEvent?: (event: ProviderEvent) => void },
+  ): Promise<void> {
     await this.setPulumiConfig(configuration, input, env)
 
-    await this.execCommand(`pulumi destroy --yes --stack ${env}`, configuration, env)
+    if (options?.onEvent) {
+      await this.execCommandStreaming(`pulumi destroy --yes --json --stack ${env}`, configuration, env, options.onEvent)
+    } else {
+      await this.execCommand(`pulumi destroy --yes --stack ${env}`, configuration, env)
+    }
   }
 
   async isDestroyed(configuration: ProviderConfig, env: string): Promise<boolean> {
@@ -244,6 +260,35 @@ class PulumiProvider implements IProvider {
       cwd: options.cwd as string,
       env: options.env as NodeJS.ProcessEnv,
     })
+  }
+
+  private async execCommandStreaming(
+    command: string,
+    configuration: ProviderConfig,
+    env: string,
+    onEvent: (event: ProviderEvent) => void,
+  ): Promise<string> {
+    const options = this.getDefaultExecOptions(configuration, env)
+    logger.debug(`[pulumi] exec (streaming): ${command}\n  cwd: ${configuration.rootPath}`)
+    const result = await spawnWithLineStream(command, {
+      cwd: options.cwd as string,
+      env: options.env as NodeJS.ProcessEnv | undefined,
+      onStdoutLine: (line) => {
+        const event = parsePulumiStreamLine(line)
+        if (event) onEvent(event)
+      },
+      onStderrLine: (line) => {
+        logger.debug(`[pulumi] stderr: ${line}`)
+      },
+    })
+
+    if (result.exitCode !== 0) {
+      const diagnostics = extractPulumiDiagnostics(result.stdout, '')
+      const message = formatProviderErrorMessage('Pulumi', configuration.alias, diagnostics, command)
+      throw new ProviderError(message, 'pulumi', configuration.alias, { diagnostics, command })
+    }
+
+    return result.stdout
   }
 
   private async execCommand(command: string, configuration: ProviderConfig, env: string): Promise<string> {

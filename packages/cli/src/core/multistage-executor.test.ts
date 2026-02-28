@@ -936,6 +936,52 @@ describe('MultistageExecutor', () => {
     })
   })
 
+  describe('streaming', () => {
+    it('should pass onEvent callback to interop.apply', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockApply.mockResolvedValue({})
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      expect(mockApply).toHaveBeenCalledOnce()
+      const callArgs = mockApply.mock.calls[0]
+      // Second arg is options containing onEvent
+      expect(callArgs[1]).toHaveProperty('onEvent')
+      expect(typeof callArgs[1].onEvent).toBe('function')
+    })
+
+    it('should pass onEvent callback to interop.destroy', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockIsDestroyed.mockResolvedValue(false)
+      mockDestroyPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 0, change: 0, remove: 1, replace: 0, outputUpdates: 0 } }),
+      )
+      mockDestroy.mockResolvedValue(undefined)
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      expect(mockDestroy).toHaveBeenCalled()
+      const callArgs = mockDestroy.mock.calls[0]
+      // Second arg is options containing onEvent
+      expect(callArgs[1]).toHaveProperty('onEvent')
+      expect(typeof callArgs[1].onEvent).toBe('function')
+    })
+  })
+
   describe('drift', () => {
     it('should return hasDrift: false when no workspaces have drift', async () => {
       envSelected()

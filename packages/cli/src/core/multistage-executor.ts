@@ -5,6 +5,7 @@ import {
   type ChangeSummary,
   hasChanges,
   type Output,
+  type ProviderEvent,
   type ProviderInput,
   type ProviderOutput,
   type ProviderPlan,
@@ -12,6 +13,7 @@ import {
 import type { IIntegration } from '../integrations/integration.js'
 import type { IFormatter } from '../formatters/formatter.js'
 import { computeDetailedDiff } from './plan-diff.js'
+import { WorkspaceApplyState, LiveRenderer, NonTtyRenderer, type ILiveRenderer } from '../rendering/index.js'
 
 interface LevelPlanEntry {
   workspace: Workspace
@@ -269,25 +271,65 @@ export class MultistageExecutor {
       }
 
       // Apply all workspaces in this level
-      logger.info(`\n🚀 Applying Level ${levelIndex + 1}...`)
+      const action = this.ctx.isDestroy ? 'Destroying' : 'Applying'
+      logger.info(`\n🚀 ${action} Level ${levelIndex + 1}...`)
+
+      const isTTY = process.stderr.isTTY ?? false
+      const renderer: ILiveRenderer = isTTY ? new LiveRenderer({ verbose: logger.isVerbose() }) : new NonTtyRenderer()
+
+      // Set up workspace states before starting the renderer
+      const wsStates = levelPlans.map(({ workspace }) => {
+        const wsState = new WorkspaceApplyState(workspace.name)
+        renderer.addWorkspace(wsState)
+        return wsState
+      })
+
+      renderer.start()
+
+      const onSigint = () => {
+        renderer.stop()
+      }
+      process.on('SIGINT', onSigint)
+
       const results = await Promise.allSettled(
-        levelPlans.map(async ({ workspace, inputs }) => {
+        levelPlans.map(async ({ workspace, inputs }, i) => {
           const interop = this.ctx.interop(workspace)
+          const wsState = wsStates[i]
+
+          const onEvent = (event: ProviderEvent) => {
+            wsState.handleEvent(event)
+            if (!isTTY) (renderer as NonTtyRenderer).writeEvent(workspace.name, event)
+          }
+
           if (this.ctx.isDestroy) {
-            logger.info(`   Destroying ${workspace.name}...`)
-            await interop.destroy(inputs)
-            this.ctx.storeDestroyedWorkspace(workspace)
-            logger.info(`   ✅ ${workspace.name} destroyed successfully`)
+            try {
+              await interop.destroy(inputs, { onEvent })
+              wsState.markComplete()
+              this.ctx.storeDestroyedWorkspace(workspace)
+            } catch (error) {
+              const msg = error instanceof Error ? error.message : String(error)
+              wsState.markFailed(msg)
+              throw error
+            }
           } else {
-            logger.info(`   Applying ${workspace.name}...`)
-            const applyOpts = workspace.skipPreview ? { skipPreview: true } : undefined
-            const outputs = await interop.apply(inputs, applyOpts)
-            this.ctx.storeWorkspaceOutputs(workspace, outputs)
-            logger.info(`   ✅ ${workspace.name} applied successfully`)
+            try {
+              const applyOpts: { skipPreview?: boolean; onEvent: (event: ProviderEvent) => void } = { onEvent }
+              if (workspace.skipPreview) applyOpts.skipPreview = true
+              const outputs = await interop.apply(inputs, applyOpts)
+              wsState.markComplete()
+              this.ctx.storeWorkspaceOutputs(workspace, outputs)
+            } catch (error) {
+              const msg = error instanceof Error ? error.message : String(error)
+              wsState.markFailed(msg)
+              throw error
+            }
           }
           return workspace
         }),
       )
+
+      process.removeListener('SIGINT', onSigint)
+      renderer.stop()
 
       this.handleLevelFailures(results, levelPlans)
 
