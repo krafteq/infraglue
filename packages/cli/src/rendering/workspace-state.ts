@@ -1,4 +1,42 @@
+import type { ChangeSummary } from '../providers/provider-plan.js'
 import type { ProviderEvent } from '../providers/provider-events.js'
+
+export type PlanStatus = 'pending' | 'planning' | 'done' | 'up-to-date' | 'failed'
+
+export class WorkspacePlanState {
+  public readonly name: string
+  public status: PlanStatus = 'pending'
+  public readonly startTime: number
+  public changeSummary: ChangeSummary | null = null
+  public error: string | null = null
+
+  constructor(name: string) {
+    this.name = name
+    this.startTime = Date.now()
+  }
+
+  markPlanning(): void {
+    this.status = 'planning'
+  }
+
+  markDone(summary: ChangeSummary): void {
+    this.status = 'done'
+    this.changeSummary = summary
+  }
+
+  markUpToDate(): void {
+    this.status = 'up-to-date'
+  }
+
+  markFailed(error: string): void {
+    this.status = 'failed'
+    this.error = error
+  }
+
+  get elapsedSeconds(): number {
+    return Math.round((Date.now() - this.startTime) / 1000)
+  }
+}
 
 export interface ResourceState {
   address: string

@@ -806,6 +806,90 @@ describe('MultistageExecutor', () => {
     })
   })
 
+  describe('parallel plan gathering', () => {
+    it('should plan multiple workspaces in a level in parallel', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(true)
+      expect(mockGetPlan).toHaveBeenCalledTimes(2)
+    })
+
+    it('should handle mixed results — one workspace has changes, one is up to date', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      let planCallCount = 0
+      mockGetPlan.mockImplementation(async () => {
+        planCallCount++
+        if (planCallCount === 1) return createProviderPlan()
+        return createProviderPlan({
+          changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+        })
+      })
+      mockGetOutputs.mockResolvedValue({ outputs: { key: { value: 'val', secret: false } }, actual: true })
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(true)
+      expect(mockGetPlan).toHaveBeenCalledTimes(2)
+    })
+
+    it('should throw combined error when plan fails for a workspace', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      let planCallCount = 0
+      mockGetPlan.mockImplementation(async () => {
+        planCallCount++
+        if (planCallCount === 1) throw new Error('terraform init failed')
+        return createProviderPlan({
+          changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+        })
+      })
+
+      await expect(executor.plan({ formatter: createFormatter() })).rejects.toThrow('Failed to plan workspaces')
+
+      // Both workspaces should have been attempted
+      expect(mockGetPlan).toHaveBeenCalledTimes(2)
+    })
+
+    it('should run single-workspace level sequentially without renderer', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(true)
+      expect(mockGetPlan).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe('--approve flag', () => {
     it('should auto-apply when --approve matches level index (non-interactive)', async () => {
       envSelected()

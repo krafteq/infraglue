@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { WorkspaceApplyState } from './workspace-state.js'
+import { WorkspaceApplyState, WorkspacePlanState } from './workspace-state.js'
 import type { ProviderEvent } from '../providers/provider-events.js'
 
 describe('WorkspaceApplyState', () => {
@@ -185,5 +185,51 @@ describe('WorkspaceApplyState', () => {
     state.handleEvent({ type: 'resource_complete', address: 'a', action: 'create', elapsedSeconds: 1 })
 
     expect(state.currentResource).toBeUndefined()
+  })
+})
+
+describe('WorkspacePlanState', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2025-01-01T00:00:00Z'))
+  })
+
+  it('initializes with correct defaults', () => {
+    const state = new WorkspacePlanState('redis')
+    expect(state.name).toBe('redis')
+    expect(state.status).toBe('pending')
+    expect(state.changeSummary).toBeNull()
+    expect(state.error).toBeNull()
+  })
+
+  it('transitions through planning → done', () => {
+    const state = new WorkspacePlanState('redis')
+    state.markPlanning()
+    expect(state.status).toBe('planning')
+
+    state.markDone({ add: 2, change: 1, remove: 0, replace: 0, outputUpdates: 0 })
+    expect(state.status).toBe('done')
+    expect(state.changeSummary).toEqual({ add: 2, change: 1, remove: 0, replace: 0, outputUpdates: 0 })
+  })
+
+  it('transitions through planning → up-to-date', () => {
+    const state = new WorkspacePlanState('redis')
+    state.markPlanning()
+    state.markUpToDate()
+    expect(state.status).toBe('up-to-date')
+  })
+
+  it('transitions through planning → failed', () => {
+    const state = new WorkspacePlanState('redis')
+    state.markPlanning()
+    state.markFailed('terraform init failed')
+    expect(state.status).toBe('failed')
+    expect(state.error).toBe('terraform init failed')
+  })
+
+  it('computes elapsedSeconds from start time', () => {
+    const state = new WorkspacePlanState('redis')
+    vi.advanceTimersByTime(7000)
+    expect(state.elapsedSeconds).toBe(7)
   })
 })

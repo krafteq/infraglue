@@ -13,7 +13,16 @@ import {
 import type { IIntegration } from '../integrations/integration.js'
 import type { IFormatter } from '../formatters/formatter.js'
 import { computeDetailedDiff } from './plan-diff.js'
-import { WorkspaceApplyState, LiveRenderer, NonTtyRenderer, type ILiveRenderer } from '../rendering/index.js'
+import {
+  WorkspaceApplyState,
+  WorkspacePlanState,
+  LiveRenderer,
+  NonTtyRenderer,
+  PlanLiveRenderer,
+  PlanNonTtyRenderer,
+  type ILiveRenderer,
+  type IPlanRenderer,
+} from '../rendering/index.js'
 
 interface LevelPlanEntry {
   workspace: Workspace
@@ -100,51 +109,147 @@ export class MultistageExecutor {
     workspaces: Workspace[],
     options?: { detailed?: boolean; savePlanFile?: boolean },
   ): Promise<LevelPlanEntry[]> {
+    if (workspaces.length <= 1) {
+      return this.gatherLevelPlansSequential(workspaces, options)
+    }
+    return this.gatherLevelPlansParallel(workspaces, options)
+  }
+
+  private async gatherLevelPlansSequential(
+    workspaces: Workspace[],
+    options?: { detailed?: boolean; savePlanFile?: boolean },
+  ): Promise<LevelPlanEntry[]> {
     const levelPlans: LevelPlanEntry[] = []
 
     for (const workspace of workspaces) {
-      const interop = this.ctx.interop(workspace)
+      const entry = await this.planSingleWorkspace(workspace, null, options)
+      if (entry) levelPlans.push(entry)
+    }
 
+    return levelPlans
+  }
+
+  private async gatherLevelPlansParallel(
+    workspaces: Workspace[],
+    options?: { detailed?: boolean; savePlanFile?: boolean },
+  ): Promise<LevelPlanEntry[]> {
+    const isTTY = process.stderr.isTTY ?? false
+    const renderer: IPlanRenderer = isTTY ? new PlanLiveRenderer() : new PlanNonTtyRenderer()
+
+    const planStates = workspaces.map((ws) => {
+      const state = new WorkspacePlanState(ws.name)
+      renderer.addWorkspace(state)
+      return state
+    })
+
+    renderer.start()
+
+    const nonTtyRenderer = !isTTY ? (renderer as PlanNonTtyRenderer) : null
+
+    const results = await Promise.allSettled(
+      workspaces.map(async (ws, i) => {
+        nonTtyRenderer?.writeStatusChange(ws.name, 'planning...')
+        try {
+          const entry = await this.planSingleWorkspace(ws, planStates[i], options)
+          const st = planStates[i]
+          if (st.status === 'done' && st.changeSummary) {
+            const cs = st.changeSummary
+            nonTtyRenderer?.writeStatusChange(ws.name, `+${cs.add} ~${cs.change} -${cs.remove} (${st.elapsedSeconds}s)`)
+          } else if (st.status === 'up-to-date') {
+            nonTtyRenderer?.writeStatusChange(ws.name, `up to date (${st.elapsedSeconds}s)`)
+          }
+          return entry
+        } catch (error) {
+          nonTtyRenderer?.writeStatusChange(ws.name, `failed (${planStates[i].elapsedSeconds}s)`)
+          throw error
+        }
+      }),
+    )
+
+    renderer.stop()
+
+    const levelPlans: LevelPlanEntry[] = []
+    const failures: { workspace: string; error: string }[] = []
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]
+      if (result.status === 'fulfilled' && result.value) {
+        levelPlans.push(result.value)
+      } else if (result.status === 'rejected') {
+        failures.push({
+          workspace: workspaces[i].name,
+          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        })
+      }
+    }
+
+    if (failures.length > 0) {
+      for (const f of failures) {
+        logger.error(`   Failed to plan ${f.workspace}:\n${f.error}`)
+      }
+      throw new UserError(`Failed to plan workspaces: ${failures.map((f) => f.workspace).join(', ')}`)
+    }
+
+    return levelPlans
+  }
+
+  private async planSingleWorkspace(
+    workspace: Workspace,
+    state: WorkspacePlanState | null,
+    options?: { detailed?: boolean; savePlanFile?: boolean },
+  ): Promise<LevelPlanEntry | null> {
+    const interop = this.ctx.interop(workspace)
+
+    state?.markPlanning()
+
+    try {
       if (this.ctx.isDestroy) {
         const isDestroyed = await interop.isDestroyed()
         if (isDestroyed) {
           logger.info(`✅ ${workspace.name} is already destroyed.`)
-          continue
+          state?.markUpToDate()
+          return null
         }
 
         const inputs: ProviderInput = await this.ctx.getInputs(workspace, { bestEffort: true })
-
         const plan = await interop.destroyPlan(inputs, options?.savePlanFile ? { savePlanFile: true } : undefined)
+
         if (!hasChanges(plan)) {
           logger.info(`✅ Nothing to destroy in ${workspace.name}`)
-          continue
+          state?.markUpToDate()
+          return null
         }
-        levelPlans.push({ workspace, inputs, plan })
+
+        state?.markDone(plan.changeSummary)
+        return { workspace, inputs, plan }
       } else {
         const inputs: ProviderInput = await this.ctx.getInputs(workspace)
-
         const plan = await interop.getPlan(inputs, options)
+
         if (!hasChanges(plan)) {
           const { outputs } = await interop.getOutputs({ stale: this.ctx.ignoreDependencies })
 
           if (hasOutputDiff(plan.outputs, outputs)) {
             logger.info(`📤 ${workspace.name} has output-only changes`)
-            levelPlans.push({ workspace, inputs, plan })
-            continue
+            state?.markDone(plan.changeSummary)
+            return { workspace, inputs, plan }
           }
 
           logger.info(`✅ ${workspace.name} is up to date.`)
-
-          // TODO: outputs can contain secrets, decide if we want to output them
           logger.debug(`Outputs: ${JSON.stringify(outputs, null, 2)}`)
           this.ctx.storeWorkspaceOutputs(workspace, outputs)
-          continue
+          state?.markUpToDate()
+          return null
         }
-        levelPlans.push({ workspace, inputs, plan })
-      }
-    }
 
-    return levelPlans
+        state?.markDone(plan.changeSummary)
+        return { workspace, inputs, plan }
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      state?.markFailed(msg)
+      throw error
+    }
   }
 
   private logPlanSummary(
