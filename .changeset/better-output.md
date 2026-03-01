@@ -1,0 +1,32 @@
+---
+'@krafteq/infraglue': minor
+---
+
+### Streaming live view for apply and destroy
+
+Apply and destroy now show real-time progress with a live-updating terminal UI. Each workspace displays resource operations as they happen, with slow resources (>30s) highlighted. Non-TTY environments get line-by-line event output for CI compatibility.
+
+### Parallel plan gathering with live progress
+
+Plan gathering for workspaces within the same execution level now runs in parallel, with a live spinner showing per-workspace status and timing.
+
+### Plan file reuse and --start-with-project
+
+Plan files are now saved during `ig apply` planning and passed to the apply step, ensuring the exact reviewed plan is applied. The `--start-with-project` flag allows resuming a multi-level apply from a specific workspace, using cached outputs for skipped levels.
+
+### Terminal-friendly formatter and --skip-preview
+
+The default plan formatter now uses a compact terminal-friendly table format. The `--skip-preview` flag suppresses the formatted plan table in the plan summary.
+
+### Cleaner plan summary and apply output
+
+- Plan summary uses compact `+N ~N -N` format instead of verbose `Add: N, Change: N, ...`
+- Removed `Inputs:` JSON dump from plan summary and confirmation prompt (security risk)
+- Secret outputs masked with `[secret]` in final global outputs
+
+### Other fixes
+
+- `--env` is now optional for `import` and `export` commands
+- Noisy workspace-interop logs demoted to debug level
+- Fixed Pulumi stack auto-creation broken by ProviderError formatting
+- Extracted diagnostic extraction into a dedicated module with ProviderError integration tests
