@@ -206,7 +206,7 @@ export class MultistageExecutor {
       if (this.ctx.isDestroy) {
         const isDestroyed = await interop.isDestroyed()
         if (isDestroyed) {
-          logger.info(`✅ ${workspace.name} is already destroyed.`)
+          if (!state) logger.info(`✅ ${workspace.name} is already destroyed.`)
           state?.markUpToDate()
           return null
         }
@@ -215,7 +215,7 @@ export class MultistageExecutor {
         const plan = await interop.destroyPlan(inputs, options?.savePlanFile ? { savePlanFile: true } : undefined)
 
         if (!hasChanges(plan)) {
-          logger.info(`✅ Nothing to destroy in ${workspace.name}`)
+          if (!state) logger.info(`✅ Nothing to destroy in ${workspace.name}`)
           state?.markUpToDate()
           return null
         }
@@ -230,12 +230,12 @@ export class MultistageExecutor {
           const { outputs } = await interop.getOutputs({ stale: this.ctx.ignoreDependencies })
 
           if (hasOutputDiff(plan.outputs, outputs)) {
-            logger.info(`📤 ${workspace.name} has output-only changes`)
+            if (!state) logger.info(`📤 ${workspace.name} has output-only changes`)
             state?.markDone(plan.changeSummary)
             return { workspace, inputs, plan }
           }
 
-          logger.info(`✅ ${workspace.name} is up to date.`)
+          if (!state) logger.info(`✅ ${workspace.name} is up to date.`)
           logger.debug(`Outputs: ${JSON.stringify(outputs, null, 2)}`)
           this.ctx.storeWorkspaceOutputs(workspace, outputs)
           state?.markUpToDate()
@@ -258,26 +258,21 @@ export class MultistageExecutor {
     formatter: IFormatter,
     options?: { skipFormattedPlan?: boolean },
   ) {
-    // TODO: it should probably be part of the formatter as well.
-    logger.info('--------------------------------')
-    logger.info(`📋 Level ${levelIndex + 1} Plan Summary:`)
-    logger.info('--------------------------------')
-
     let totalChanges = zero()
-    for (const { workspace, plan } of levelPlans) {
-      logger.info(`\n🏭 Workspace: ${workspace.name}`)
-      logger.info(`   ${dump(plan.changeSummary)}`)
+    for (const { plan } of levelPlans) {
       totalChanges = add(totalChanges, plan.changeSummary)
     }
 
-    logger.info(`\n📊 Total Changes: ${dump(totalChanges)}`)
+    const maxNameLen = Math.max(...levelPlans.map(({ workspace }) => workspace.name.length))
+    logger.info(`📋 Level ${levelIndex + 1} Plan Summary: ${dump(totalChanges)}`)
+    for (const { workspace, plan } of levelPlans) {
+      logger.info(`   ${workspace.name.padEnd(maxNameLen)}  ${dump(plan.changeSummary)}`)
+    }
 
     if (!options?.skipFormattedPlan) {
-      for (const { workspace, inputs, plan } of levelPlans) {
+      for (const { workspace, plan } of levelPlans) {
         const formatted = formatter.format(plan)
-        logger.info(`\n🏭 Workspace: ${workspace.name}`)
-        logger.info(`Inputs:\n${JSON.stringify(inputs, null, 2)}`)
-        logger.info(`Plan:\n${formatted}`)
+        logger.info(`\n${workspace.name}:\n${formatted}`)
       }
     }
   }
@@ -396,11 +391,11 @@ export class MultistageExecutor {
         this.logPlanSummary(levelIndex, levelPlans, opts.formatter, { skipFormattedPlan: true })
 
         let message = levelPlans
-          .map(({ workspace, inputs, plan }) => {
+          .map(({ workspace, plan }) => {
             const formatted = opts.formatter.format(plan)
-            return `🏭 Workspace: ${workspace.name}\nInputs:\n${JSON.stringify(inputs, null, 2)}\nPlan:\n${formatted}`
+            return `${workspace.name}:\n${formatted}`
           })
-          .join('\n--------------------------------\n')
+          .join('\n\n')
 
         message += '\n--------------------------------\n'
         message += `Apply all workspaces in Level ${levelIndex + 1}?`
@@ -496,12 +491,11 @@ export class MultistageExecutor {
           if (outputValue === undefined) {
             logger.warn(`Value to output ${exp.key} from workspace ${exp.workspace} is not found`)
           } else {
-            result[exp.name] = outputValue.value
+            result[exp.name] = outputValue.secret ? '[secret]' : outputValue.value
           }
         }
         logger.info('Outputs:')
         logger.info(JSON.stringify(result, null, 2))
-        logger.info('--------------------------------')
       }
     }
   }
@@ -663,7 +657,9 @@ function zero(): ChangeSummary {
 }
 
 function dump(changes: ChangeSummary): string {
-  return `Add: ${changes.add}, Change: ${changes.change}, Remove: ${changes.remove}, Replace: ${changes.replace}, Outputs: ${changes.outputUpdates}`
+  const parts = [`+${changes.add} ~${changes.change} -${changes.remove}`]
+  if (changes.replace > 0) parts.push(`±${changes.replace}`)
+  return parts.join(' ')
 }
 
 function add(changes1: ChangeSummary, changes2: ChangeSummary): ChangeSummary {
