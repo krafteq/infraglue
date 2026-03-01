@@ -202,6 +202,7 @@ ig plan --env dev --detailed          # show attribute-level diffs
 ig apply --env dev                    # apply all workspaces in dev environment
 ig apply --env dev --project postgres # apply only the postgres workspace
 ig apply --env dev --no-deps          # apply without running dependencies
+ig apply --env dev --start-with-project postgres  # skip upstream levels, use cached outputs
 ig destroy --env staging              # destroy all workspaces
 
 # Drift detection and reconciliation
@@ -248,6 +249,15 @@ ig install-skill --force              # overwrite existing
 | `1,2,3` | Auto-approve specific levels       |
 
 Level numbers are 1-indexed. Without `--approve`, the command waits for interactive confirmation.
+
+**`--start-with-project <name>`** (for `ig apply`, `ig destroy`, `ig plan`):
+
+Skip all execution levels before the level containing the named project. Cached outputs from `.ig/state.json` are used for skipped workspaces instead of running provider commands. Useful for resuming partially-applied monorepos or iterating on a downstream workspace without re-running upstream.
+
+- Requires a prior full `ig apply` so that cached outputs exist in `.ig/state.json`
+- Mutually exclusive with `--project` and `--no-deps`
+- Level numbers in `--approve` still refer to the original plan levels
+- Errors if cached outputs are missing for any skipped workspace
 
 **Exit codes:** `0` = success / no changes, `1` = error, `2` = changes detected (plan/drift)
 
@@ -361,22 +371,6 @@ If `provider` is not set in a workspace's `ig.yaml`, ig detects it automatically
 ## Environment State
 
 The selected environment is stored in `.ig/.env` at the monorepo root. This file is created by `ig env select` and persists across commands. Pass `--env` to override without changing the stored selection.
-
-## Skip Preview
-
-Pass `--skip-preview` to `ig apply` or `ig destroy` to bypass the preview/plan step and apply/destroy directly. This is useful for Pulumi workspaces that use providers connecting to services not yet deployed (e.g., a Pulumi program that configures a database created by another workspace — the preview would fail because the database doesn't exist yet).
-
-```bash
-ig apply --env dev --skip-preview
-ig destroy --env dev --skip-preview
-```
-
-When `--skip-preview` is used:
-
-- `ig apply` applies without running a preview first (Pulumi: `pulumi up --yes --skip-preview`)
-- `ig destroy` destroys without running a destroy plan first (Pulumi: `pulumi destroy --yes --skip-preview`)
-- All workspaces in the monorepo are affected (it is a global flag, not per-workspace)
-- The `ig plan` command does not accept `--skip-preview` (plan's purpose is preview)
 
 ## Output-Only Change Detection
 

@@ -27,7 +27,7 @@ class PulumiProvider implements IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     env: string,
-    _options?: { detailed?: boolean; refresh?: boolean },
+    _options?: { detailed?: boolean; refresh?: boolean; savePlanFile?: boolean },
   ): Promise<ProviderPlan> {
     await this.setPulumiConfig(configuration, input, env)
 
@@ -40,15 +40,14 @@ class PulumiProvider implements IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     env: string,
-    options?: { skipPreview?: boolean; onEvent?: (event: ProviderEvent) => void },
+    options?: { onEvent?: (event: ProviderEvent) => void; planFile?: string },
   ): Promise<ProviderOutput> {
     await this.setPulumiConfig(configuration, input, env)
 
-    const skipPreviewFlag = options?.skipPreview ? ' --skip-preview' : ''
     if (options?.onEvent) {
-      await this.execCommandStreaming(`pulumi up --yes --json${skipPreviewFlag}`, configuration, env, options.onEvent)
+      await this.execCommandStreaming(`pulumi up --yes --json`, configuration, env, options.onEvent)
     } else {
-      await this.execCommand(`pulumi up --yes --json${skipPreviewFlag}`, configuration, env)
+      await this.execCommand(`pulumi up --yes --json`, configuration, env)
     }
 
     return this.getOutputsWithSecretDetection(configuration, env)
@@ -58,7 +57,12 @@ class PulumiProvider implements IProvider {
     return this.getOutputsWithSecretDetection(configuration, env)
   }
 
-  async destroyPlan(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan> {
+  async destroyPlan(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    env: string,
+    _options?: { savePlanFile?: boolean },
+  ): Promise<ProviderPlan> {
     await this.setPulumiConfig(configuration, input, env)
 
     const stdout = await this.execCommand(
@@ -75,20 +79,14 @@ class PulumiProvider implements IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     env: string,
-    options?: { skipPreview?: boolean; onEvent?: (event: ProviderEvent) => void },
+    options?: { onEvent?: (event: ProviderEvent) => void; planFile?: string },
   ): Promise<void> {
     await this.setPulumiConfig(configuration, input, env)
 
-    const skipPreviewFlag = options?.skipPreview ? ' --skip-preview' : ''
     if (options?.onEvent) {
-      await this.execCommandStreaming(
-        `pulumi destroy --yes --json --stack ${env}${skipPreviewFlag}`,
-        configuration,
-        env,
-        options.onEvent,
-      )
+      await this.execCommandStreaming(`pulumi destroy --yes --json --stack ${env}`, configuration, env, options.onEvent)
     } else {
-      await this.execCommand(`pulumi destroy --yes --stack ${env}${skipPreviewFlag}`, configuration, env)
+      await this.execCommand(`pulumi destroy --yes --stack ${env}`, configuration, env)
     }
   }
 

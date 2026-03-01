@@ -111,19 +111,6 @@ describe('WorkspaceInterop', () => {
     expect(provider.apply).toHaveBeenCalledOnce()
   })
 
-  it('should pass skipPreview option to provider apply', async () => {
-    const { provider, interop } = setup()
-    provider.apply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
-
-    await interop.apply({ input: { value: 'val', secret: false } }, { skipPreview: true })
-    expect(provider.apply).toHaveBeenCalledWith(
-      expect.objectContaining({ alias: 'ws1' }),
-      { input: { value: 'val', secret: false } },
-      'dev',
-      { skipPreview: true },
-    )
-  })
-
   it('should delegate destroyPlan to provider', async () => {
     const { provider, interop } = setup()
     const mockPlan: ProviderPlan = {
@@ -148,16 +135,6 @@ describe('WorkspaceInterop', () => {
 
     await interop.destroy({})
     expect(provider.destroy).toHaveBeenCalledOnce()
-  })
-
-  it('should pass skipPreview option to provider destroy', async () => {
-    const { provider, interop } = setup()
-    provider.destroy.mockResolvedValue(undefined)
-
-    await interop.destroy({}, { skipPreview: true })
-    expect(provider.destroy).toHaveBeenCalledWith(expect.objectContaining({ alias: 'ws1' }), {}, 'dev', {
-      skipPreview: true,
-    })
   })
 
   it('should delegate isDestroyed to provider', async () => {
@@ -284,6 +261,54 @@ describe('WorkspaceInterop', () => {
     await interop.apply({ input: { value: 'val', secret: false } })
     expect(provider.apply).toHaveBeenCalledOnce()
     expect(mockUpdate).not.toHaveBeenCalled()
+  })
+
+  it('should forward savePlanFile option to provider getPlan', async () => {
+    const { provider, interop } = setup()
+    provider.getPlan.mockResolvedValue(createProviderPlan())
+
+    await interop.getPlan({ key: { value: 'value', secret: false } }, { savePlanFile: true })
+    expect(provider.getPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ alias: 'ws1' }),
+      { key: { value: 'value', secret: false } },
+      'dev',
+      { savePlanFile: true },
+    )
+  })
+
+  it('should forward planFile option to provider apply', async () => {
+    const { provider, interop } = setup()
+    provider.apply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
+
+    await interop.apply({ input: { value: 'val', secret: false } }, { planFile: 'ig-plan.bin' })
+    expect(provider.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ alias: 'ws1' }),
+      { input: { value: 'val', secret: false } },
+      'dev',
+      { planFile: 'ig-plan.bin' },
+    )
+  })
+
+  it('should forward savePlanFile option to provider destroyPlan', async () => {
+    const { provider, interop } = setup()
+    provider.destroyPlan.mockResolvedValue(
+      createProviderPlan({ changeSummary: { add: 0, change: 0, remove: 1, replace: 0, outputUpdates: 0 } }),
+    )
+
+    await interop.destroyPlan({}, { savePlanFile: true })
+    expect(provider.destroyPlan).toHaveBeenCalledWith(expect.objectContaining({ alias: 'ws1' }), {}, 'dev', {
+      savePlanFile: true,
+    })
+  })
+
+  it('should forward planFile option to provider destroy', async () => {
+    const { provider, interop } = setup()
+    provider.destroy.mockResolvedValue(undefined)
+
+    await interop.destroy({}, { planFile: 'ig-destroy-plan.bin' })
+    expect(provider.destroy).toHaveBeenCalledWith(expect.objectContaining({ alias: 'ws1' }), {}, 'dev', {
+      planFile: 'ig-destroy-plan.bin',
+    })
   })
 
   it('should build correct provider config', async () => {

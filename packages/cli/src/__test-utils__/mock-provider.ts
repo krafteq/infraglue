@@ -14,7 +14,7 @@ export class MockProvider implements IProvider {
   getOutputs = vi.fn<IProvider['getOutputs']>((): Promise<ProviderOutput> => {
     throw new Error('Method not implemented.')
   })
-  destroyPlan = vi.fn<IProvider['destroyPlan']>((): Promise<ProviderPlan> => {
+  destroyPlan = vi.fn<IProvider['destroyPlan']>((_, __, ___, _options?): Promise<ProviderPlan> => {
     throw new Error('Method not implemented.')
   })
   destroy = vi.fn<IProvider['destroy']>((): Promise<void> => {

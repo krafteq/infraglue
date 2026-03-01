@@ -87,7 +87,7 @@ interface IApplyOptions {
   approve?: number[] | 'all'
   env: string
   project?: string
-  skipPreview?: boolean
+  startWithProject?: string
 }
 
 const execCommands = [
@@ -103,6 +103,7 @@ program
   .option('-e, --env <env>', 'Environment to plan')
   .option('--no-deps', 'Ignore dependencies')
   .option('--detailed', 'Show attribute-level diffs for changed resources')
+  .option('--start-with-project <project>', 'Skip levels before this project, use cached outputs')
   .action(
     async ({
       format,
@@ -110,16 +111,27 @@ program
       project,
       deps,
       detailed,
+      startWithProject,
     }: {
       format?: string
       env: string
       project?: string
       deps: boolean
       detailed?: boolean
+      startWithProject?: string
     }) => {
       const monorepo = requireMonorepo()
       env = await resolveEnv(env)
-      const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, false, env)
+      validateStartWithProject(startWithProject, project, deps)
+      const startWithWorkspace = startWithProject ? monorepo.getWorkspace(startWithProject) : undefined
+      const execContext = new ExecutionContext(
+        monorepo,
+        currentWorkspace(project),
+        !deps,
+        false,
+        env,
+        startWithWorkspace,
+      )
       const result = await new MultistageExecutor(execContext).plan({
         formatter: getFormatter(format),
         detailed: detailed ?? false,
@@ -154,22 +166,37 @@ for (const execCmd of execCommands) {
     .option('-p, --project <project>', 'Project to apply')
     .option('-e, --env <env>', 'environment to apply. If provided, the environment will be selected before applying')
     .option('--no-deps', 'Ignore dependencies')
-    .option('--skip-preview', 'Skip preview/plan step and apply/destroy directly')
+    .option('--start-with-project <project>', 'Skip levels before this project, use cached outputs')
     .action(
-      async ({ format, integration, approve, env, project, deps, skipPreview }: IApplyOptions & { deps: boolean }) => {
+      async ({
+        format,
+        integration,
+        approve,
+        env,
+        project,
+        deps,
+        startWithProject,
+      }: IApplyOptions & { deps: boolean }) => {
         const monorepo = requireMonorepo()
         env = await resolveEnv(env)
+        validateStartWithProject(startWithProject, project, deps)
+        const startWithWorkspace = startWithProject ? monorepo.getWorkspace(startWithProject) : undefined
 
-        const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, execCmd.isDestroy, env)
+        const execContext = new ExecutionContext(
+          monorepo,
+          currentWorkspace(project),
+          !deps,
+          execCmd.isDestroy,
+          env,
+          startWithWorkspace,
+        )
 
-        const execOpts: Parameters<MultistageExecutor['exec']>[0] = {
+        await new MultistageExecutor(execContext).exec({
           approve: approve,
           integration: getIntegration(detectIntegration(integration)),
           formatter: getFormatter(format),
           preview: false,
-        }
-        if (skipPreview) execOpts.skipPreview = true
-        await new MultistageExecutor(execContext).exec(execOpts)
+        })
       },
     )
 }
@@ -398,7 +425,8 @@ Examples:
   $ ig ${execCmd.name} --env production --approve 1
   $ ig ${execCmd.name} --env production --approve 1,2,3
   $ ig ${execCmd.name} --env production --approve all
-  $ ig ${execCmd.name} --env dev --project postgres`,
+  $ ig ${execCmd.name} --env dev --project postgres
+  $ ig ${execCmd.name} --env dev --start-with-project postgres --approve all`,
   )
 }
 
@@ -455,6 +483,16 @@ function currentWorkspace(project?: string | undefined): Workspace | undefined {
   }
 
   return undefined
+}
+
+function validateStartWithProject(startWithProject?: string, project?: string, deps?: boolean) {
+  if (!startWithProject) return
+  if (project) {
+    throw new UserError('--start-with-project and --project are mutually exclusive.')
+  }
+  if (deps === false) {
+    throw new UserError('--start-with-project and --no-deps are mutually exclusive.')
+  }
 }
 
 function requireCurrentWorkspace(project?: string | undefined): Workspace {

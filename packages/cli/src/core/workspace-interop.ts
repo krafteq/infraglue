@@ -46,26 +46,29 @@ export class WorkspaceInterop {
     return { outputs, actual: true }
   }
 
-  public getPlan(input: ProviderInput, options?: { detailed?: boolean; refresh?: boolean }): Promise<ProviderPlan> {
+  public getPlan(
+    input: ProviderInput,
+    options?: { detailed?: boolean; refresh?: boolean; savePlanFile?: boolean },
+  ): Promise<ProviderPlan> {
     return this.provider.getPlan(this.providerConfig(), input, this.env, options)
   }
 
   public async apply(
     input: ProviderInput,
-    options?: { skipPreview?: boolean; onEvent?: (event: ProviderEvent) => void },
+    options?: { onEvent?: (event: ProviderEvent) => void; planFile?: string },
   ): Promise<ProviderOutput> {
     const outputs = await this.provider.apply(this.providerConfig(), input, this.env, options)
     await this.storeOutputs(outputs)
     return outputs
   }
 
-  public destroyPlan(input: ProviderInput): Promise<ProviderPlan> {
-    return this.provider.destroyPlan(this.providerConfig(), input, this.env)
+  public destroyPlan(input: ProviderInput, options?: { savePlanFile?: boolean }): Promise<ProviderPlan> {
+    return this.provider.destroyPlan(this.providerConfig(), input, this.env, options)
   }
 
   public destroy(
     input: ProviderInput,
-    options?: { skipPreview?: boolean; onEvent?: (event: ProviderEvent) => void },
+    options?: { onEvent?: (event: ProviderEvent) => void; planFile?: string },
   ): Promise<void> {
     return this.provider.destroy(this.providerConfig(), input, this.env, options)
   }

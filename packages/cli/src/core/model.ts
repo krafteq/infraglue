@@ -12,6 +12,7 @@ export class ExecutionContext {
     public readonly ignoreDependencies: boolean,
     public readonly isDestroy: boolean,
     public readonly env: string,
+    public readonly startWithWorkspace?: Workspace | undefined,
   ) {}
 
   public interop(workspace: Workspace): WorkspaceInterop {

@@ -27,7 +27,7 @@ _ig_completions() {
   esac
 
   if [[ "\${cur}" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--env --format --integration --approve --verbose --quiet --strict --directory --help --json --project --no-deps --detailed --refresh-only --skip-preview" -- "\${cur}") )
+    COMPREPLY=( $(compgen -W "--env --format --integration --approve --verbose --quiet --strict --directory --help --json --project --no-deps --detailed --refresh-only --start-with-project" -- "\${cur}") )
   fi
 }
 complete -F _ig_completions ig
@@ -77,7 +77,7 @@ _ig() {
             '(-a --approve)'{-a,--approve}'[Auto-approve level]:level:' \\
             '(-p --project)'{-p,--project}'[Project name]:project:' \\
             '--no-deps[Ignore dependencies]' \\
-            '--skip-preview[Skip preview/plan step]'
+            '--start-with-project[Skip levels before project]:project:'
           ;;
         plan)
           _arguments \\
@@ -85,7 +85,8 @@ _ig() {
             '(-f --format)'{-f,--format}'[Output format]:format:(default)' \\
             '(-p --project)'{-p,--project}'[Project name]:project:' \\
             '--no-deps[Ignore dependencies]' \\
-            '--detailed[Show attribute-level diffs]'
+            '--detailed[Show attribute-level diffs]' \\
+            '--start-with-project[Skip levels before project]:project:'
           ;;
         drift)
           _arguments \\
@@ -160,7 +161,7 @@ complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s i -l integratio
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s a -l approve -d 'Auto-approve level' -r
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s p -l project -d 'Project name' -r
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -l no-deps -d 'Ignore dependencies'
-complete -c ig -n '__fish_seen_subcommand_from apply destroy' -l skip-preview -d 'Skip preview/plan step'
+complete -c ig -n '__fish_seen_subcommand_from apply destroy' -l start-with-project -d 'Skip levels before project' -r
 
 # plan options
 complete -c ig -n '__fish_seen_subcommand_from plan' -s e -l env -d 'Environment name' -r
@@ -168,6 +169,7 @@ complete -c ig -n '__fish_seen_subcommand_from plan' -s f -l format -d 'Output f
 complete -c ig -n '__fish_seen_subcommand_from plan' -s p -l project -d 'Project name' -r
 complete -c ig -n '__fish_seen_subcommand_from plan' -l no-deps -d 'Ignore dependencies'
 complete -c ig -n '__fish_seen_subcommand_from plan' -l detailed -d 'Show attribute-level diffs'
+complete -c ig -n '__fish_seen_subcommand_from plan' -l start-with-project -d 'Skip levels before project' -r
 
 # drift options
 complete -c ig -n '__fish_seen_subcommand_from drift' -s e -l env -d 'Environment name' -r
