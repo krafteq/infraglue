@@ -335,7 +335,7 @@ program
   .description('Import an existing cloud resource into infrastructure state')
   .argument('<args...>', 'Arguments to pass to the provider import command')
   .requiredOption('-p, --project <project>', 'Project to import into')
-  .requiredOption('-e, --env <env>', 'Environment to use')
+  .option('-e, --env <env>', 'Environment to use')
   .addHelpText(
     'after',
     `
@@ -343,7 +343,7 @@ Examples:
   $ ig import aws_instance.web i-1234567890abcdef0 --project webserver --env staging
   $ ig import 'aws:ec2/instance:Instance' web i-1234567890abcdef0 --project webserver --env staging`,
   )
-  .action(async (args: string[], { env, project }: { env: string; project: string }) => {
+  .action(async (args: string[], { env, project }: { env?: string; project: string }) => {
     const monorepo = requireMonorepo()
     env = await resolveEnv(env)
     const ws = requireCurrentWorkspace(project)
@@ -358,7 +358,7 @@ program
   .description('Generate code for imported or existing cloud resources')
   .argument('<args...>', 'Arguments to pass to the provider generate-code command')
   .requiredOption('-p, --project <project>', 'Project to generate code for')
-  .requiredOption('-e, --env <env>', 'Environment to use')
+  .option('-e, --env <env>', 'Environment to use')
   .addHelpText(
     'after',
     `
@@ -366,7 +366,7 @@ Examples:
   $ ig export aws_instance.web i-1234567890abcdef0 --project webserver --env staging
   $ ig export 'aws:ec2/instance:Instance' web i-1234567890abcdef0 --project webserver --env staging`,
   )
-  .action(async (args: string[], { env, project }: { env: string; project: string }) => {
+  .action(async (args: string[], { env, project }: { env?: string; project: string }) => {
     const monorepo = requireMonorepo()
     env = await resolveEnv(env)
     const ws = requireCurrentWorkspace(project)
