@@ -141,7 +141,7 @@ class PulumiProvider implements IProvider {
     try {
       await this.execCommand(`pulumi stack select ${env}`, configuration, env)
     } catch (error) {
-      if (error instanceof Error && error.message.includes(`no stack named '${env}' found`)) {
+      if (this.isStackNotFoundError(error, env)) {
         logger.warn(`${configuration.alias}:: Stack ${env} does not exist. Creating it...`)
         await this.execCommand(`pulumi stack init ${env}`, configuration, env)
         await this.execCommand(`pulumi stack select ${env}`, configuration, env)
@@ -149,6 +149,15 @@ class PulumiProvider implements IProvider {
         throw error
       }
     }
+  }
+
+  private isStackNotFoundError(error: unknown, env: string): boolean {
+    if (!(error instanceof ProviderError)) return false
+    // Check formatted message (may include diagnostic summaries)
+    if (error.message.includes(`no stack named`) && error.message.includes(env)) return true
+    // Check command — if it was a `stack select` and diagnostics are empty, the stack doesn't exist
+    if (error.command?.includes('stack select') && error.diagnostics.length === 0) return true
+    return false
   }
 
   private async getOutputsWithSecretDetection(configuration: ProviderConfig, env: string): Promise<ProviderOutput> {
