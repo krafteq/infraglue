@@ -24,6 +24,14 @@ The default plan formatter now uses a compact terminal-friendly table format. Th
 - Removed `Inputs:` JSON dump from plan summary and confirmation prompt (security risk)
 - Secret outputs masked with `[secret]` in final global outputs
 
+### Environment variable files (.ig/.env)
+
+ig now loads `.ig/.env` (base) and `.ig/.env.{envName}` (per-environment) files into `process.env` before config interpolation. Values are available for `${VAR}` substitution in ig.yaml and automatically flow to provider subprocesses. The `.ig/` directory is already gitignored, making it safe for secrets and local overrides.
+
+### Skip plan step when --approve is set
+
+Pre-approved levels now skip the plan step entirely and apply directly, which is faster — especially for Pulumi where preview and up both run the program.
+
 ### Other fixes
 
 - `--env` is now optional for `import` and `export` commands
