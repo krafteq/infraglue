@@ -176,6 +176,52 @@ envs:
 - A missing (unset) environment variable throws an error; empty string is valid
 - Structural fields (`workspace`, `injection`, `depends_on`, `alias`, `provider`, `output`) are NOT interpolated
 
+### Environment Variable Files
+
+ig loads `.env` files from the `.ig/` directory before config interpolation, so values are available for `${VAR}` substitution in ig.yaml and for provider subprocesses (Terraform/Pulumi).
+
+**Files loaded (in order):**
+
+1. `.ig/.env` — base variables, overrides `process.env`
+2. `.ig/.env.{envName}` — per-environment variables, overrides both
+
+Missing files are silently ignored. The `.ig/` directory is gitignored by default (its `.gitignore` contains `*`), making it safe for secrets and local overrides.
+
+**Format:**
+
+```text
+# Comments and blank lines are ignored
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+export API_KEY="my-secret-key"
+QUOTED_VALUE='single quotes work too'
+COMPLEX=value=with=equals
+```
+
+Supported syntax: `KEY=VALUE`, `KEY="quoted"`, `KEY='single quoted'`, `# comments`, blank lines, and `export` prefix.
+
+**Example usage:**
+
+```bash
+# .ig/.env — shared across all environments
+TF_STATE_BUCKET=my-terraform-state
+AWS_REGION=us-east-1
+
+# .ig/.env.prod — production-only overrides
+DATABASE_HOST=prod-db.example.com
+API_KEY=prod-secret-key
+```
+
+```yaml
+# ig.yaml — references are resolved from loaded .env files
+envs:
+  prod:
+    backend_config:
+      bucket: ${TF_STATE_BUCKET}
+    vars:
+      db_host: ${DATABASE_HOST}
+```
+
 ## Dependency Injection
 
 Workspaces wire outputs from upstream workspaces using the `injection` field:
@@ -370,7 +416,7 @@ If `provider` is not set in a workspace's `ig.yaml`, ig detects it automatically
 
 ## Environment State
 
-The selected environment is stored in `.ig/.env` at the monorepo root. This file is created by `ig env select` and persists across commands. Pass `--env` to override without changing the stored selection.
+The selected environment is stored in `.ig/state.json` at the monorepo root. This file is created by `ig env select` and persists across commands. Pass `--env` to override without changing the stored selection.
 
 ## Output-Only Change Detection
 

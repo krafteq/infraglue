@@ -2,7 +2,7 @@
 
 import { Command, Help } from 'commander'
 import { dirname, join, resolve } from 'path'
-import { readFile } from 'fs/promises'
+import { readFile, access } from 'fs/promises'
 import {
   globalConfig,
   EnvManager,
@@ -46,22 +46,23 @@ program
   )
   .description('CLI tool for infra-glue')
   .version(await getPackageJsonVersion())
-  .hook('preAction', async (command) => {
-    if (command.opts().verbose || isDebug()) {
+  .hook('preAction', async (thisCommand, actionCommand) => {
+    if (thisCommand.opts().verbose || isDebug()) {
       logger.setVerbose()
     }
-    if (command.opts().quiet) {
+    if (thisCommand.opts().quiet) {
       logger.setQuiet()
     }
-    if (command.opts().strict) {
+    if (thisCommand.opts().strict) {
       globalConfig.strict = true
     }
     const disableStateOutputs = process.env['IG_DISABLE_STATE_OUTPUTS']
     if (disableStateOutputs === '1' || disableStateOutputs === 'true') {
       globalConfig.disableStateOutputs = true
     }
-    currentDir = resolve(command.opts().directory)
-    monorepo = await tryResolveMonorepo(currentDir)
+    currentDir = resolve(thisCommand.opts().directory)
+    const envName = actionCommand?.opts?.()?.env ?? (await peekStateEnv(currentDir))
+    monorepo = await tryResolveMonorepo(currentDir, envName)
   })
 
 const envCommand = program.command('env')
@@ -450,6 +451,21 @@ program.configureHelp({
     return defaultHelp
   },
 })
+
+async function peekStateEnv(startPath: string): Promise<string | undefined> {
+  for (let current = resolve(startPath); current !== dirname(current); current = dirname(current)) {
+    const stateFile = join(current, '.ig', 'state.json')
+    try {
+      await access(stateFile)
+      const content = await readFile(stateFile, 'utf-8')
+      const state = JSON.parse(content) as { current_environment?: string }
+      return state.current_environment ?? undefined
+    } catch {
+      continue
+    }
+  }
+  return undefined
+}
 
 async function resolveEnv(env?: string | undefined): Promise<string> {
   if (env) {

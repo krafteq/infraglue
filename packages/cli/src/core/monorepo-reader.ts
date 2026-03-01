@@ -5,7 +5,7 @@ import { parse as parseYaml } from 'yaml'
 import { glob } from 'node:fs/promises'
 import type { MonorepoConfig, WorkspaceConfig } from './config-files.js'
 import { globalConfig } from './global-config.js'
-import { logger, UserError, ConfigError, interpolateConfig } from '../utils/index.js'
+import { logger, UserError, ConfigError, interpolateConfig, loadDotEnvFiles } from '../utils/index.js'
 import { getProvider, providers as knownProviders } from '../providers/index.js'
 import type { EnvironmentConfig } from '../providers/index.js'
 import { monorepoConfigSchema, workspaceConfigSchema, formatZodError } from './schemas.js'
@@ -13,11 +13,11 @@ import { monorepoConfigSchema, workspaceConfigSchema, formatZodError } from './s
 const CONFIG_FILE_NAMES = ['ig.yaml', 'ig.yml']
 const DEFAULT_ENCODING = 'utf-8'
 
-export async function tryResolveMonorepo(startPath: string): Promise<Monorepo | null> {
+export async function tryResolveMonorepo(startPath: string, envName?: string): Promise<Monorepo | null> {
   startPath = resolve(startPath)
   for (let current = resolve(startPath); current !== dirname(current); current = dirname(current)) {
     try {
-      const monorepo = await tryReadMonorepo(current)
+      const monorepo = await tryReadMonorepo(current, envName)
       if (monorepo && (monorepo.path === startPath || monorepo.workspaces.find((x) => x.path === startPath))) {
         return monorepo
       }
@@ -35,7 +35,8 @@ export async function tryResolveMonorepo(startPath: string): Promise<Monorepo | 
   return null
 }
 
-export async function tryReadMonorepo(rootPath: string): Promise<Monorepo | null> {
+export async function tryReadMonorepo(rootPath: string, envName?: string): Promise<Monorepo | null> {
+  await loadDotEnvFiles(rootPath, envName)
   const raw = await readConfigFile(rootPath)
   if (raw && Array.isArray(raw.workspace) && raw.workspace.length > 0) {
     const parsed = monorepoConfigSchema.safeParse(raw)
