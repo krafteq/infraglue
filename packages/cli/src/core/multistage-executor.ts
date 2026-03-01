@@ -277,9 +277,9 @@ export class MultistageExecutor {
     }
   }
 
-  private handleLevelFailures(results: PromiseSettledResult<Workspace>[], levelPlans: LevelPlanEntry[]): void {
+  private handleLevelFailures(results: PromiseSettledResult<Workspace>[], workspaces: Workspace[]): void {
     const failures = results
-      .map((r, i) => ({ result: r, workspace: levelPlans[i].workspace }))
+      .map((r, i) => ({ result: r, workspace: workspaces[i] }))
       .filter((x): x is { result: PromiseRejectedResult; workspace: Workspace } => x.result.status === 'rejected')
 
     if (failures.length > 0) {
@@ -364,6 +364,104 @@ export class MultistageExecutor {
     return { hasChanges: hasAnyChanges }
   }
 
+  private async applyWorkspaces(
+    entries: Array<{ workspace: Workspace; inputs: ProviderInput; planFile?: string }>,
+    levelIndex: number,
+  ): Promise<void> {
+    const action = this.ctx.isDestroy ? 'Destroying' : 'Applying'
+    logger.info(`\n🚀 ${action} Level ${levelIndex + 1}...`)
+
+    const isTTY = process.stderr.isTTY ?? false
+    const renderer: ILiveRenderer = isTTY ? new LiveRenderer({ verbose: logger.isVerbose() }) : new NonTtyRenderer()
+
+    const wsStates = entries.map(({ workspace }) => {
+      const wsState = new WorkspaceApplyState(workspace.name)
+      renderer.addWorkspace(wsState)
+      return wsState
+    })
+
+    renderer.start()
+
+    const onSigint = () => {
+      renderer.stop()
+    }
+    process.on('SIGINT', onSigint)
+
+    const results = await Promise.allSettled(
+      entries.map(async ({ workspace, inputs, planFile }, i) => {
+        const interop = this.ctx.interop(workspace)
+        const wsState = wsStates[i]
+
+        const onEvent = (event: ProviderEvent) => {
+          wsState.handleEvent(event)
+          if (!isTTY) (renderer as NonTtyRenderer).writeEvent(workspace.name, event)
+        }
+
+        const applyOpts = planFile ? { onEvent, planFile } : { onEvent }
+
+        if (this.ctx.isDestroy) {
+          try {
+            await interop.destroy(inputs, applyOpts)
+            wsState.markComplete()
+            this.ctx.storeDestroyedWorkspace(workspace)
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error)
+            wsState.markFailed(msg)
+            throw error
+          }
+        } else {
+          try {
+            const outputs = await interop.apply(inputs, applyOpts)
+            wsState.markComplete()
+            this.ctx.storeWorkspaceOutputs(workspace, outputs)
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error)
+            wsState.markFailed(msg)
+            throw error
+          }
+        }
+        return workspace
+      }),
+    )
+
+    process.removeListener('SIGINT', onSigint)
+    renderer.stop()
+
+    this.handleLevelFailures(
+      results,
+      entries.map((e) => e.workspace),
+    )
+  }
+
+  private async applyLevelDirectly(workspaces: Workspace[], levelIndex: number): Promise<void> {
+    logger.info(`Level ${levelIndex + 1} pre-approved, applying directly...`)
+
+    const entries: Array<{ workspace: Workspace; inputs: ProviderInput }> = []
+
+    for (const workspace of workspaces) {
+      if (this.ctx.isDestroy) {
+        const interop = this.ctx.interop(workspace)
+        const isDestroyed = await interop.isDestroyed()
+        if (isDestroyed) {
+          logger.info(`✅ ${workspace.name} is already destroyed.`)
+          continue
+        }
+        const inputs = await this.ctx.getInputs(workspace, { bestEffort: true })
+        entries.push({ workspace, inputs })
+      } else {
+        const inputs = await this.ctx.getInputs(workspace)
+        entries.push({ workspace, inputs })
+      }
+    }
+
+    if (entries.length === 0) {
+      logger.info('✅ No workspaces to apply in this level')
+      return
+    }
+
+    await this.applyWorkspaces(entries, levelIndex)
+  }
+
   public async exec(opts: IExecOptions) {
     await this.validateEnv()
 
@@ -377,6 +475,12 @@ export class MultistageExecutor {
       logger.info(`\n🔧 Processing Level ${levelIndex + 1}/${executionPlan.levelsCount}`)
       logger.info('=====================================')
 
+      if (isLevelApproved(opts.approve, levelIndex + 1)) {
+        await this.applyLevelDirectly(level.workspaces, levelIndex)
+        logger.info(`✅ Level ${levelIndex + 1} completed`)
+        continue
+      }
+
       const levelPlans = await this.gatherLevelPlans(level.workspaces, { savePlanFile: true })
 
       if (levelPlans.length === 0) {
@@ -384,97 +488,36 @@ export class MultistageExecutor {
         continue
       }
 
-      if (isLevelApproved(opts.approve, levelIndex + 1)) {
-        this.logPlanSummary(levelIndex, levelPlans, opts.formatter)
-        logger.info(`Level ${levelIndex + 1} approved, applying...`)
-      } else {
-        this.logPlanSummary(levelIndex, levelPlans, opts.formatter, { skipFormattedPlan: true })
+      this.logPlanSummary(levelIndex, levelPlans, opts.formatter, { skipFormattedPlan: true })
 
-        let message = levelPlans
-          .map(({ workspace, plan }) => {
-            const formatted = opts.formatter.format(plan)
-            return `${workspace.name}:\n${formatted}`
-          })
-          .join('\n\n')
+      let message = levelPlans
+        .map(({ workspace, plan }) => {
+          const formatted = opts.formatter.format(plan)
+          return `${workspace.name}:\n${formatted}`
+        })
+        .join('\n\n')
 
-        message += '\n--------------------------------\n'
-        message += `Apply all workspaces in Level ${levelIndex + 1}?`
+      message += '\n--------------------------------\n'
+      message += `Apply all workspaces in Level ${levelIndex + 1}?`
 
-        const answer = await opts.integration.askForConfirmation(message)
+      const answer = await opts.integration.askForConfirmation(message)
 
-        if (!opts.integration.interactive) {
-          logger.info('Not interactive, waiting for confirmation and another cli execution')
-          return
-        }
-
-        if (!answer) {
-          logger.info('Aborting...')
-          return
-        }
+      if (!opts.integration.interactive) {
+        logger.info('Not interactive, waiting for confirmation and another cli execution')
+        return
       }
 
-      // Apply all workspaces in this level
-      const action = this.ctx.isDestroy ? 'Destroying' : 'Applying'
-      logger.info(`\n🚀 ${action} Level ${levelIndex + 1}...`)
+      if (!answer) {
+        logger.info('Aborting...')
+        return
+      }
 
-      const isTTY = process.stderr.isTTY ?? false
-      const renderer: ILiveRenderer = isTTY ? new LiveRenderer({ verbose: logger.isVerbose() }) : new NonTtyRenderer()
-
-      // Set up workspace states before starting the renderer
-      const wsStates = levelPlans.map(({ workspace }) => {
-        const wsState = new WorkspaceApplyState(workspace.name)
-        renderer.addWorkspace(wsState)
-        return wsState
+      const entries = levelPlans.map(({ workspace, inputs, plan }) => {
+        const entry: { workspace: Workspace; inputs: ProviderInput; planFile?: string } = { workspace, inputs }
+        if (plan.planFile) entry.planFile = plan.planFile
+        return entry
       })
-
-      renderer.start()
-
-      const onSigint = () => {
-        renderer.stop()
-      }
-      process.on('SIGINT', onSigint)
-
-      const results = await Promise.allSettled(
-        levelPlans.map(async ({ workspace, inputs, plan }, i) => {
-          const interop = this.ctx.interop(workspace)
-          const wsState = wsStates[i]
-
-          const onEvent = (event: ProviderEvent) => {
-            wsState.handleEvent(event)
-            if (!isTTY) (renderer as NonTtyRenderer).writeEvent(workspace.name, event)
-          }
-
-          const applyOpts = plan.planFile ? { onEvent, planFile: plan.planFile } : { onEvent }
-
-          if (this.ctx.isDestroy) {
-            try {
-              await interop.destroy(inputs, applyOpts)
-              wsState.markComplete()
-              this.ctx.storeDestroyedWorkspace(workspace)
-            } catch (error) {
-              const msg = error instanceof Error ? error.message : String(error)
-              wsState.markFailed(msg)
-              throw error
-            }
-          } else {
-            try {
-              const outputs = await interop.apply(inputs, applyOpts)
-              wsState.markComplete()
-              this.ctx.storeWorkspaceOutputs(workspace, outputs)
-            } catch (error) {
-              const msg = error instanceof Error ? error.message : String(error)
-              wsState.markFailed(msg)
-              throw error
-            }
-          }
-          return workspace
-        }),
-      )
-
-      process.removeListener('SIGINT', onSigint)
-      renderer.stop()
-
-      this.handleLevelFailures(results, levelPlans)
+      await this.applyWorkspaces(entries, levelIndex)
 
       logger.info(`✅ Level ${levelIndex + 1} completed`)
     }

@@ -891,40 +891,36 @@ describe('MultistageExecutor', () => {
   })
 
   describe('--approve flag', () => {
-    it('should auto-apply when --approve matches level index (non-interactive)', async () => {
+    it('should skip plan and apply directly when --approve matches level (non-interactive)', async () => {
       envSelected()
       const ws1 = createWs('ws1')
       const monorepo = new Monorepo('/root', [ws1], [], undefined)
       const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
       const executor = new MultistageExecutor(ctx)
 
-      mockGetPlan.mockResolvedValue(
-        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
-      )
       mockApply.mockResolvedValue({})
 
       const integration = createNonInteractiveIntegration()
       await executor.exec({ formatter: createFormatter(), integration, approve: [1] })
 
+      expect(mockGetPlan).not.toHaveBeenCalled()
       expect(integration.askForConfirmation).not.toHaveBeenCalled()
       expect(mockApply).toHaveBeenCalledOnce()
     })
 
-    it('should auto-apply when --approve matches level index (interactive)', async () => {
+    it('should skip plan and apply directly when --approve matches level (interactive)', async () => {
       envSelected()
       const ws1 = createWs('ws1')
       const monorepo = new Monorepo('/root', [ws1], [], undefined)
       const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
       const executor = new MultistageExecutor(ctx)
 
-      mockGetPlan.mockResolvedValue(
-        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
-      )
       mockApply.mockResolvedValue({})
 
       const integration = createInteractiveIntegration()
       await executor.exec({ formatter: createFormatter(), integration, approve: [1] })
 
+      expect(mockGetPlan).not.toHaveBeenCalled()
       expect(integration.askForConfirmation).not.toHaveBeenCalled()
       expect(mockApply).toHaveBeenCalledOnce()
     })
@@ -948,7 +944,7 @@ describe('MultistageExecutor', () => {
       expect(mockApply).not.toHaveBeenCalled()
     })
 
-    it('should auto-approve all levels with --approve all', async () => {
+    it('should skip plan for all levels with --approve all', async () => {
       envSelected()
       const ws1 = createWs('ws1')
       const ws2 = createWs('ws2', ['ws1'])
@@ -956,19 +952,17 @@ describe('MultistageExecutor', () => {
       const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
       const executor = new MultistageExecutor(ctx)
 
-      mockGetPlan.mockResolvedValue(
-        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
-      )
       mockApply.mockResolvedValue({})
 
       const integration = createNonInteractiveIntegration()
       await executor.exec({ formatter: createFormatter(), integration, approve: 'all' })
 
+      expect(mockGetPlan).not.toHaveBeenCalled()
       expect(integration.askForConfirmation).not.toHaveBeenCalled()
       expect(mockApply).toHaveBeenCalledTimes(2)
     })
 
-    it('should auto-approve only specified levels with --approve 1,2', async () => {
+    it('should skip plan only for approved levels with --approve 1,2', async () => {
       envSelected()
       const ws1 = createWs('ws1')
       const ws2 = createWs('ws2', ['ws1'])
@@ -986,10 +980,103 @@ describe('MultistageExecutor', () => {
       // Approve levels 1 and 2, but not level 3
       await executor.exec({ formatter: createFormatter(), integration, approve: [1, 2] })
 
-      // Levels 1 and 2 should be auto-approved and applied
+      // Levels 1 and 2 should be directly applied (no plan), level 3 plans normally
       expect(mockApply).toHaveBeenCalledTimes(2)
+      // getPlan only called for level 3 (the non-approved level)
+      expect(mockGetPlan).toHaveBeenCalledOnce()
       // Level 3 should trigger askForConfirmation and stop (non-interactive)
       expect(integration.askForConfirmation).toHaveBeenCalledOnce()
+    })
+
+    it('should apply without planFile when level is pre-approved', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockApply.mockResolvedValue({ key: { value: 'val', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration(), approve: [1] })
+
+      expect(mockApply).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.objectContaining({ planFile: expect.anything() }),
+      )
+    })
+
+    it('should store outputs after direct apply', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockApply.mockResolvedValue({ key: { value: 'applied-value', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration(), approve: [1] })
+
+      expect(ctx.findAppliedOutput('ws1', 'key')).toEqual({ value: 'applied-value', secret: false })
+    })
+
+    it('should skip destroyed workspaces in direct apply (destroy path)', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockIsDestroyed.mockResolvedValue(true)
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration(), approve: [1] })
+
+      expect(mockGetPlan).not.toHaveBeenCalled()
+      expect(mockDestroyPlan).not.toHaveBeenCalled()
+      expect(mockDestroy).not.toHaveBeenCalled()
+    })
+
+    it('should destroy directly when level is pre-approved', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockIsDestroyed.mockResolvedValue(false)
+      mockDestroy.mockResolvedValue(undefined)
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration(), approve: [1] })
+
+      expect(mockDestroyPlan).not.toHaveBeenCalled()
+      expect(mockDestroy).toHaveBeenCalledOnce()
+      // No planFile should be passed
+      expect(mockDestroy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.objectContaining({ planFile: expect.anything() }),
+      )
+    })
+
+    it('should handle failures in direct apply', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      let applyCallCount = 0
+      mockApply.mockImplementation(async () => {
+        applyCallCount++
+        if (applyCallCount === 1) throw new Error('apply failed')
+        return { key: { value: 'val', secret: false } }
+      })
+
+      await expect(
+        executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration(), approve: [1] }),
+      ).rejects.toThrow('Failed to apply workspaces')
+
+      // Both workspaces attempted apply
+      expect(mockApply).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -1616,7 +1703,8 @@ describe('MultistageExecutor', () => {
         approve: [2, 3],
       })
 
-      // Both levels 2 and 3 should be auto-approved and applied
+      // Both levels 2 and 3 should be directly applied (no plan)
+      expect(mockGetPlan).not.toHaveBeenCalled()
       expect(mockApply).toHaveBeenCalledTimes(2)
     })
 

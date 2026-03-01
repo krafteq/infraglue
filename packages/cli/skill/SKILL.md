@@ -248,7 +248,7 @@ ig install-skill --force              # overwrite existing
 | `1`     | Auto-approve level 1 only          |
 | `1,2,3` | Auto-approve specific levels       |
 
-Level numbers are 1-indexed. Without `--approve`, the command waits for interactive confirmation.
+Level numbers are 1-indexed. Without `--approve`, the command waits for interactive confirmation. Pre-approved levels skip the plan step entirely and apply directly (no `terraform plan`/`pulumi preview`), which is faster — especially for Pulumi where preview and up both run the program.
 
 **`--start-with-project <name>`** (for `ig apply`, `ig destroy`, `ig plan`):
 
