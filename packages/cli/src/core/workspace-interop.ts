@@ -36,7 +36,7 @@ export class WorkspaceInterop {
       const state = await this.stateManager.read()
       const cachedOutputs = state.workspace(this.workspace.name).outputs
       if (cachedOutputs) {
-        logger.info(`Getting stale outputs for workspace ${this.workspace.name}`)
+        logger.debug(`Getting stale outputs for workspace ${this.workspace.name}`)
         return { outputs: cachedOutputs, actual: false }
       }
     }
@@ -79,9 +79,9 @@ export class WorkspaceInterop {
 
   public async selectEnvironment(): Promise<void> {
     await this.storeOutputs(null)
-    logger.info(`Selecting environment for ${this.workspace.name}`)
+    logger.debug(`Selecting environment for ${this.workspace.name}`)
     await this.provider.selectEnvironment(this.providerConfig(), this.env)
-    logger.info(`Selected environment for ${this.workspace.name}`)
+    logger.debug(`Selected environment for ${this.workspace.name}`)
   }
 
   public existsInFolder(folderPath: string): Promise<boolean> {
