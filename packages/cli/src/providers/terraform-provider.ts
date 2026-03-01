@@ -5,9 +5,13 @@ import { readdir, readFile, copyFile, rm, access, constants, writeFile } from 'f
 import type { IProvider, ProviderConfig } from './provider.js'
 import type { ProviderInput, ProviderOutput, OutputValue } from './provider.js'
 import type { ProviderPlan, ResourceChange, Output, Diagnostic } from './provider-plan.js'
-import { logger, UserError, ProviderError } from '../utils/index.js'
+import type { ProviderEvent } from './provider-events.js'
+import { logger, UserError, ProviderError, formatProviderErrorMessage } from '../utils/index.js'
 import { StateManager } from '../core/index.js'
 import { spawn } from 'node:child_process'
+import { extractTerraformDiagnostics } from './diagnostic-extraction.js'
+import { spawnWithLineStream } from './spawn-command.js'
+import { parseTerraformStreamLine } from './stream-parser.js'
 
 const execAsync = promisify(exec)
 const spawnAsync = promisify(spawn)
@@ -21,7 +25,7 @@ class TerraformProvider implements IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     environment: string,
-    options?: { detailed?: boolean; refresh?: boolean },
+    options?: { detailed?: boolean; refresh?: boolean; savePlanFile?: boolean },
   ): Promise<ProviderPlan> {
     const variables = await this.getVariableString(configuration, input, environment)
     const refreshFlag = options?.refresh === false ? '-refresh=false ' : ''
@@ -37,9 +41,24 @@ class TerraformProvider implements IProvider {
       const plan = this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
 
       const showOutput = await this.execCommand(`terraform show -json ${planFile}`, configuration)
-      await rm(join(configuration.rootPath, planFile)).catch(() => {})
 
-      return enrichPlanWithShowOutput(plan, showOutput)
+      if (!options.savePlanFile) {
+        await rm(join(configuration.rootPath, planFile)).catch(() => {})
+      }
+
+      return { ...enrichPlanWithShowOutput(plan, showOutput), ...(options.savePlanFile ? { planFile } : {}) }
+    }
+
+    if (options?.savePlanFile) {
+      const stateManager = new StateManager(configuration.rootMonoRepoFolder)
+      const planFile = await stateManager.storeWorkspaceTempFile(configuration.rootPath, 'ig-plan.bin', '')
+
+      const stdout = await this.execCommand(
+        `terraform plan ${refreshFlag}-out=${planFile} --json ${variables}`,
+        configuration,
+      )
+
+      return { ...this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath)), planFile }
     }
 
     const stdout = await this.execCommand(`terraform plan ${refreshFlag}--json ${variables}`, configuration)
@@ -51,11 +70,28 @@ class TerraformProvider implements IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     environment: string,
-    _options?: { skipPreview?: boolean },
+    options?: { onEvent?: (event: ProviderEvent) => void; planFile?: string },
   ): Promise<ProviderOutput> {
-    const variables = await this.getVariableString(configuration, input, environment)
-
-    await this.execCommand(`terraform apply --auto-approve --json ${variables}`, configuration)
+    if (options?.planFile) {
+      const planFilePath = options.planFile
+      if (options.onEvent) {
+        await this.execCommandStreaming(`terraform apply --json ${planFilePath}`, configuration, options.onEvent)
+      } else {
+        await this.execCommand(`terraform apply --json ${planFilePath}`, configuration)
+      }
+      await rm(join(configuration.rootPath, planFilePath)).catch(() => {})
+    } else {
+      const variables = await this.getVariableString(configuration, input, environment)
+      if (options?.onEvent) {
+        await this.execCommandStreaming(
+          `terraform apply --auto-approve --json ${variables}`,
+          configuration,
+          options.onEvent,
+        )
+      } else {
+        await this.execCommand(`terraform apply --auto-approve --json ${variables}`, configuration)
+      }
+    }
 
     const stdout = await this.execCommand(`terraform output --json`, configuration)
 
@@ -68,18 +104,57 @@ class TerraformProvider implements IProvider {
     return parseTerraformOutputJson(stdout)
   }
 
-  async destroyPlan(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<ProviderPlan> {
+  async destroyPlan(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    environment: string,
+    options?: { savePlanFile?: boolean },
+  ): Promise<ProviderPlan> {
     const variables = await this.getVariableString(configuration, input, environment)
+
+    if (options?.savePlanFile) {
+      const stateManager = new StateManager(configuration.rootMonoRepoFolder)
+      const planFile = await stateManager.storeWorkspaceTempFile(configuration.rootPath, 'ig-destroy-plan.bin', '')
+
+      const stdout = await this.execCommand(
+        `terraform plan -destroy -out=${planFile} --json ${variables}`,
+        configuration,
+      )
+
+      return { ...this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath)), planFile }
+    }
 
     const stdout = await this.execCommand(`terraform plan -destroy --json ${variables}`, configuration)
 
     return this.mapTerraformOutputToProviderPlan(stdout, basename(configuration.rootPath))
   }
 
-  async destroy(configuration: ProviderConfig, input: ProviderInput, environment: string): Promise<void> {
-    const variables = await this.getVariableString(configuration, input, environment)
-
-    await this.execCommand(`terraform destroy --auto-approve ${variables}`, configuration)
+  async destroy(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    environment: string,
+    options?: { onEvent?: (event: ProviderEvent) => void; planFile?: string },
+  ): Promise<void> {
+    if (options?.planFile) {
+      const planFilePath = options.planFile
+      if (options.onEvent) {
+        await this.execCommandStreaming(`terraform apply --json ${planFilePath}`, configuration, options.onEvent)
+      } else {
+        await this.execCommand(`terraform apply --json ${planFilePath}`, configuration)
+      }
+      await rm(join(configuration.rootPath, planFilePath)).catch(() => {})
+    } else {
+      const variables = await this.getVariableString(configuration, input, environment)
+      if (options?.onEvent) {
+        await this.execCommandStreaming(
+          `terraform destroy --auto-approve --json ${variables}`,
+          configuration,
+          options.onEvent,
+        )
+      } else {
+        await this.execCommand(`terraform destroy --auto-approve ${variables}`, configuration)
+      }
+    }
   }
 
   async isDestroyed(configuration: ProviderConfig): Promise<boolean> {
@@ -257,6 +332,32 @@ class TerraformProvider implements IProvider {
     })
   }
 
+  private async execCommandStreaming(
+    command: string,
+    configuration: ProviderConfig,
+    onEvent: (event: ProviderEvent) => void,
+  ): Promise<string> {
+    logger.debug(`[terraform] exec (streaming): ${command}\n  cwd: ${configuration.rootPath}`)
+    const result = await spawnWithLineStream(command, {
+      cwd: configuration.rootPath,
+      onStdoutLine: (line) => {
+        const event = parseTerraformStreamLine(line)
+        if (event) onEvent(event)
+      },
+      onStderrLine: (line) => {
+        logger.debug(`[terraform] stderr: ${line}`)
+      },
+    })
+
+    if (result.exitCode !== 0) {
+      const diagnostics = extractTerraformDiagnostics(result.stdout, '')
+      const message = formatProviderErrorMessage('Terraform', configuration.alias, diagnostics, command)
+      throw new ProviderError(message, 'terraform', configuration.alias, { diagnostics, command })
+    }
+
+    return result.stdout
+  }
+
   private async execCommand(command: string, configuration: ProviderConfig): Promise<string> {
     try {
       logger.debug(`[terraform] exec: ${command}\n  cwd: ${configuration.rootPath}`)
@@ -276,15 +377,9 @@ class TerraformProvider implements IProvider {
         logger.debug(
           `[terraform] exec failed: ${command}\n  cwd: ${configuration.rootPath}\n  code: ${err.code}\n  stderr:\n${err.stderr}\n  stdout (raw):\n${err.stdout}`,
         )
-        const messageParts = [
-          `Terraform command failed in ${configuration.alias}:`,
-          `Command: ${command}`,
-          `Error message: ${error.message}`,
-          `Error code: ${err.code}`,
-          `Error stderr: ${err.stderr}`,
-          `Error stdout: ${err.stdout}`,
-        ]
-        throw new ProviderError(messageParts.join('\n\t'), 'terraform', configuration.alias)
+        const diagnostics = extractTerraformDiagnostics(err.stdout ?? '', err.stderr ?? '')
+        const message = formatProviderErrorMessage('Terraform', configuration.alias, diagnostics, command)
+        throw new ProviderError(message, 'terraform', configuration.alias, { diagnostics, command })
       }
       throw error
     }

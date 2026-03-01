@@ -14,7 +14,7 @@ export class MockProvider implements IProvider {
   getOutputs = vi.fn<IProvider['getOutputs']>((): Promise<ProviderOutput> => {
     throw new Error('Method not implemented.')
   })
-  destroyPlan = vi.fn<IProvider['destroyPlan']>((): Promise<ProviderPlan> => {
+  destroyPlan = vi.fn<IProvider['destroyPlan']>((_, __, ___, _options?): Promise<ProviderPlan> => {
     throw new Error('Method not implemented.')
   })
   destroy = vi.fn<IProvider['destroy']>((): Promise<void> => {
@@ -51,7 +51,6 @@ export function createWorkspace(
   envs: string[] = ['dev'],
   provider?: IProvider,
   rootVars: Record<string, string> = {},
-  skipPreview: boolean = false,
 ): Workspace {
   const envConfig: Record<string, EnvironmentConfig> = envs.reduce(
     (acc, env) => ({ ...acc, [env]: {} }),
@@ -66,7 +65,6 @@ export function createWorkspace(
     dependsOn,
     envConfig,
     rootVars,
-    skipPreview,
   )
 }
 

@@ -4,8 +4,12 @@ import { terraformProvider } from './terraform-provider.js'
 
 export * from './pulumi-provider.js'
 export * from './terraform-provider.js'
+export * from './diagnostic-extraction.js'
 export * from './provider.js'
 export * from './provider-plan.js'
+export * from './provider-events.js'
+export * from './stream-parser.js'
+export * from './spawn-command.js'
 
 export const providers = [pulumiProvider, terraformProvider]
 

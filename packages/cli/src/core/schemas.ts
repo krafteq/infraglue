@@ -24,7 +24,6 @@ export const workspaceConfigSchema = z.object({
   depends_on: z.array(z.string()).optional(),
   envs: z.record(envConfigSchema).optional(),
   alias: z.string().optional(),
-  skip_preview: z.boolean().optional(),
 })
 
 export const monorepoConfigSchema = z.object({

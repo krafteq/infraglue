@@ -1,10 +1,11 @@
-import { type ExecutionContext, ExecutionPlanBuilder, Workspace } from './model.js'
+import { type ExecutionContext, type ExecutionPlan, ExecutionPlanBuilder, Workspace } from './model.js'
 import { StateManager } from './state-manager.js'
 import { logger, UserError } from '../utils/index.js'
 import {
   type ChangeSummary,
   hasChanges,
   type Output,
+  type ProviderEvent,
   type ProviderInput,
   type ProviderOutput,
   type ProviderPlan,
@@ -12,6 +13,16 @@ import {
 import type { IIntegration } from '../integrations/integration.js'
 import type { IFormatter } from '../formatters/formatter.js'
 import { computeDetailedDiff } from './plan-diff.js'
+import {
+  WorkspaceApplyState,
+  WorkspacePlanState,
+  LiveRenderer,
+  NonTtyRenderer,
+  PlanLiveRenderer,
+  PlanNonTtyRenderer,
+  type ILiveRenderer,
+  type IPlanRenderer,
+} from '../rendering/index.js'
 
 interface LevelPlanEntry {
   workspace: Workspace
@@ -41,67 +52,204 @@ export class MultistageExecutor {
     }
   }
 
-  private async gatherLevelPlans(workspaces: Workspace[], options?: { detailed?: boolean }): Promise<LevelPlanEntry[]> {
+  private async resolveStartLevel(executionPlan: ExecutionPlan): Promise<number> {
+    const target = this.ctx.startWithWorkspace
+    if (!target) return 0
+
+    let targetLevelIndex = -1
+    for (let i = 0; i < executionPlan.levelsCount; i++) {
+      if (executionPlan.levels[i].workspaces.some((ws) => ws.name === target.name)) {
+        targetLevelIndex = i
+        break
+      }
+    }
+
+    if (targetLevelIndex === -1) {
+      throw new UserError(
+        `Workspace '${target.name}' not found in the execution plan. ` +
+          `It may not have the selected environment or may be filtered out by --project.`,
+      )
+    }
+
+    if (targetLevelIndex === 0) return 0
+
+    // Validate that all skipped workspaces have cached outputs in state
+    const state = await this.stateManager.read()
+    const missingOutputs: string[] = []
+
+    for (let i = 0; i < targetLevelIndex; i++) {
+      for (const ws of executionPlan.levels[i].workspaces) {
+        const cachedOutputs = state.workspace(ws.name).outputs
+        if (!cachedOutputs) {
+          missingOutputs.push(ws.name)
+        }
+      }
+    }
+
+    if (missingOutputs.length > 0) {
+      throw new UserError(
+        `Cannot skip to '${target.name}': missing cached outputs for skipped workspaces: ${missingOutputs.join(', ')}. ` +
+          `Run a full 'ig apply' first to populate the cache.`,
+      )
+    }
+
+    // Pre-populate workspaceOutputs from cached state for skipped levels
+    for (let i = 0; i < targetLevelIndex; i++) {
+      for (const ws of executionPlan.levels[i].workspaces) {
+        const cachedOutputs = state.workspace(ws.name).outputs!
+        this.ctx.storeWorkspaceOutputs(ws, cachedOutputs)
+        logger.info(`⏭️  Skipping ${ws.name} (using cached outputs)`)
+      }
+    }
+
+    return targetLevelIndex
+  }
+
+  private async gatherLevelPlans(
+    workspaces: Workspace[],
+    options?: { detailed?: boolean; savePlanFile?: boolean },
+  ): Promise<LevelPlanEntry[]> {
+    if (workspaces.length <= 1) {
+      return this.gatherLevelPlansSequential(workspaces, options)
+    }
+    return this.gatherLevelPlansParallel(workspaces, options)
+  }
+
+  private async gatherLevelPlansSequential(
+    workspaces: Workspace[],
+    options?: { detailed?: boolean; savePlanFile?: boolean },
+  ): Promise<LevelPlanEntry[]> {
     const levelPlans: LevelPlanEntry[] = []
 
     for (const workspace of workspaces) {
-      const interop = this.ctx.interop(workspace)
+      const entry = await this.planSingleWorkspace(workspace, null, options)
+      if (entry) levelPlans.push(entry)
+    }
 
+    return levelPlans
+  }
+
+  private async gatherLevelPlansParallel(
+    workspaces: Workspace[],
+    options?: { detailed?: boolean; savePlanFile?: boolean },
+  ): Promise<LevelPlanEntry[]> {
+    const isTTY = process.stderr.isTTY ?? false
+    const renderer: IPlanRenderer = isTTY ? new PlanLiveRenderer() : new PlanNonTtyRenderer()
+
+    const planStates = workspaces.map((ws) => {
+      const state = new WorkspacePlanState(ws.name)
+      renderer.addWorkspace(state)
+      return state
+    })
+
+    renderer.start()
+
+    const nonTtyRenderer = !isTTY ? (renderer as PlanNonTtyRenderer) : null
+
+    const results = await Promise.allSettled(
+      workspaces.map(async (ws, i) => {
+        nonTtyRenderer?.writeStatusChange(ws.name, 'planning...')
+        try {
+          const entry = await this.planSingleWorkspace(ws, planStates[i], options)
+          const st = planStates[i]
+          if (st.status === 'done' && st.changeSummary) {
+            const cs = st.changeSummary
+            nonTtyRenderer?.writeStatusChange(ws.name, `+${cs.add} ~${cs.change} -${cs.remove} (${st.elapsedSeconds}s)`)
+          } else if (st.status === 'up-to-date') {
+            nonTtyRenderer?.writeStatusChange(ws.name, `up to date (${st.elapsedSeconds}s)`)
+          }
+          return entry
+        } catch (error) {
+          nonTtyRenderer?.writeStatusChange(ws.name, `failed (${planStates[i].elapsedSeconds}s)`)
+          throw error
+        }
+      }),
+    )
+
+    renderer.stop()
+
+    const levelPlans: LevelPlanEntry[] = []
+    const failures: { workspace: string; error: string }[] = []
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]
+      if (result.status === 'fulfilled' && result.value) {
+        levelPlans.push(result.value)
+      } else if (result.status === 'rejected') {
+        failures.push({
+          workspace: workspaces[i].name,
+          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        })
+      }
+    }
+
+    if (failures.length > 0) {
+      for (const f of failures) {
+        logger.error(`   Failed to plan ${f.workspace}:\n${f.error}`)
+      }
+      throw new UserError(`Failed to plan workspaces: ${failures.map((f) => f.workspace).join(', ')}`)
+    }
+
+    return levelPlans
+  }
+
+  private async planSingleWorkspace(
+    workspace: Workspace,
+    state: WorkspacePlanState | null,
+    options?: { detailed?: boolean; savePlanFile?: boolean },
+  ): Promise<LevelPlanEntry | null> {
+    const interop = this.ctx.interop(workspace)
+
+    state?.markPlanning()
+
+    try {
       if (this.ctx.isDestroy) {
         const isDestroyed = await interop.isDestroyed()
         if (isDestroyed) {
-          logger.info(`✅ ${workspace.name} is already destroyed.`)
-          continue
+          if (!state) logger.info(`✅ ${workspace.name} is already destroyed.`)
+          state?.markUpToDate()
+          return null
         }
 
         const inputs: ProviderInput = await this.ctx.getInputs(workspace, { bestEffort: true })
-        const plan = await interop.destroyPlan(inputs)
+        const plan = await interop.destroyPlan(inputs, options?.savePlanFile ? { savePlanFile: true } : undefined)
+
         if (!hasChanges(plan)) {
-          logger.info(`✅ Nothing to destroy in ${workspace.name}`)
-          continue
+          if (!state) logger.info(`✅ Nothing to destroy in ${workspace.name}`)
+          state?.markUpToDate()
+          return null
         }
-        levelPlans.push({ workspace, inputs, plan })
+
+        state?.markDone(plan.changeSummary)
+        return { workspace, inputs, plan }
       } else {
         const inputs: ProviderInput = await this.ctx.getInputs(workspace)
-
-        if (workspace.skipPreview) {
-          logger.info(`⏩ ${workspace.name} has skip_preview enabled, skipping plan`)
-          const syntheticPlan: ProviderPlan = {
-            provider: workspace.providerName,
-            projectName: workspace.name,
-            timestamp: new Date(),
-            resourceChanges: [],
-            outputs: [],
-            diagnostics: [],
-            changeSummary: { add: 0, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
-            metadata: { skipPreview: true },
-          }
-          levelPlans.push({ workspace, inputs, plan: syntheticPlan })
-          continue
-        }
-
         const plan = await interop.getPlan(inputs, options)
+
         if (!hasChanges(plan)) {
           const { outputs } = await interop.getOutputs({ stale: this.ctx.ignoreDependencies })
 
           if (hasOutputDiff(plan.outputs, outputs)) {
-            logger.info(`📤 ${workspace.name} has output-only changes`)
-            levelPlans.push({ workspace, inputs, plan })
-            continue
+            if (!state) logger.info(`📤 ${workspace.name} has output-only changes`)
+            state?.markDone(plan.changeSummary)
+            return { workspace, inputs, plan }
           }
 
-          logger.info(`✅ ${workspace.name} is up to date.`)
-
-          // TODO: outputs can contain secrets, decide if we want to output them
+          if (!state) logger.info(`✅ ${workspace.name} is up to date.`)
           logger.debug(`Outputs: ${JSON.stringify(outputs, null, 2)}`)
           this.ctx.storeWorkspaceOutputs(workspace, outputs)
-          continue
+          state?.markUpToDate()
+          return null
         }
-        levelPlans.push({ workspace, inputs, plan })
-      }
-    }
 
-    return levelPlans
+        state?.markDone(plan.changeSummary)
+        return { workspace, inputs, plan }
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      state?.markFailed(msg)
+      throw error
+    }
   }
 
   private logPlanSummary(
@@ -110,27 +258,41 @@ export class MultistageExecutor {
     formatter: IFormatter,
     options?: { skipFormattedPlan?: boolean },
   ) {
-    // TODO: it should probably be part of the formatter as well.
-    logger.info('--------------------------------')
-    logger.info(`📋 Level ${levelIndex + 1} Plan Summary:`)
-    logger.info('--------------------------------')
-
     let totalChanges = zero()
-    for (const { workspace, plan } of levelPlans) {
-      logger.info(`\n🏭 Workspace: ${workspace.name}`)
-      logger.info(`   ${dump(plan.changeSummary)}`)
+    for (const { plan } of levelPlans) {
       totalChanges = add(totalChanges, plan.changeSummary)
     }
 
-    logger.info(`\n📊 Total Changes: ${dump(totalChanges)}`)
+    const maxNameLen = Math.max(...levelPlans.map(({ workspace }) => workspace.name.length))
+    logger.info(`📋 Level ${levelIndex + 1} Plan Summary: ${dump(totalChanges)}`)
+    for (const { workspace, plan } of levelPlans) {
+      logger.info(`   ${workspace.name.padEnd(maxNameLen)}  ${dump(plan.changeSummary)}`)
+    }
 
     if (!options?.skipFormattedPlan) {
-      for (const { workspace, inputs, plan } of levelPlans) {
+      for (const { workspace, plan } of levelPlans) {
         const formatted = formatter.format(plan)
-        logger.info(`\n🏭 Workspace: ${workspace.name}`)
-        logger.info(`Inputs:\n${JSON.stringify(inputs, null, 2)}`)
-        logger.info(`Plan:\n${formatted}`)
+        logger.info(`\n${workspace.name}:\n${formatted}`)
       }
+    }
+  }
+
+  private handleLevelFailures(results: PromiseSettledResult<Workspace>[], workspaces: Workspace[]): void {
+    const failures = results
+      .map((r, i) => ({ result: r, workspace: workspaces[i] }))
+      .filter((x): x is { result: PromiseRejectedResult; workspace: Workspace } => x.result.status === 'rejected')
+
+    if (failures.length > 0) {
+      const failedNames = failures.map((f) => f.workspace.name)
+      const action = this.ctx.isDestroy ? 'destroy' : 'apply'
+      for (const { workspace, result } of failures) {
+        const reason = result.reason instanceof Error ? result.reason.message : String(result.reason)
+        logger.error(`   Failed to ${action} ${workspace.name}:\n${reason}`)
+      }
+      throw new UserError(
+        `Failed to ${action} workspaces: ${failedNames.join(', ')}. ` +
+          `If provider state is locked, run 'ig provider force-unlock <lock-id>' in each failed workspace.`,
+      )
     }
   }
 
@@ -138,11 +300,12 @@ export class MultistageExecutor {
     await this.validateEnv()
 
     const executionPlan = new ExecutionPlanBuilder(this.ctx).build()
+    const startIndex = await this.resolveStartLevel(executionPlan)
     logger.info(`\n Selected Environment: ${this.ctx.env}`)
 
     let hasAnyChanges = false
 
-    for (let levelIndex = 0; levelIndex < executionPlan.levelsCount; levelIndex++) {
+    for (let levelIndex = startIndex; levelIndex < executionPlan.levelsCount; levelIndex++) {
       const level = executionPlan.levels[levelIndex]
 
       logger.info(`\n🔧 Processing Level ${levelIndex + 1}/${executionPlan.levelsCount}`)
@@ -201,92 +364,164 @@ export class MultistageExecutor {
     return { hasChanges: hasAnyChanges }
   }
 
+  private async applyWorkspaces(
+    entries: Array<{ workspace: Workspace; inputs: ProviderInput; planFile?: string }>,
+    levelIndex: number,
+  ): Promise<WorkspaceApplyState[]> {
+    const action = this.ctx.isDestroy ? 'Destroying' : 'Applying'
+    logger.info(`\n🚀 ${action} Level ${levelIndex + 1}...`)
+
+    const isTTY = process.stderr.isTTY ?? false
+    const renderer: ILiveRenderer = isTTY ? new LiveRenderer({ verbose: logger.isVerbose() }) : new NonTtyRenderer()
+
+    const wsStates = entries.map(({ workspace }) => {
+      const wsState = new WorkspaceApplyState(workspace.name)
+      renderer.addWorkspace(wsState)
+      return wsState
+    })
+
+    renderer.start()
+
+    const onSigint = () => {
+      renderer.stop()
+    }
+    process.on('SIGINT', onSigint)
+
+    const results = await Promise.allSettled(
+      entries.map(async ({ workspace, inputs, planFile }, i) => {
+        const interop = this.ctx.interop(workspace)
+        const wsState = wsStates[i]
+
+        const onEvent = (event: ProviderEvent) => {
+          wsState.handleEvent(event)
+          if (!isTTY) (renderer as NonTtyRenderer).writeEvent(workspace.name, event)
+        }
+
+        const applyOpts = planFile ? { onEvent, planFile } : { onEvent }
+
+        if (this.ctx.isDestroy) {
+          try {
+            await interop.destroy(inputs, applyOpts)
+            wsState.markComplete()
+            this.ctx.storeDestroyedWorkspace(workspace)
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error)
+            wsState.markFailed(msg)
+            throw error
+          }
+        } else {
+          try {
+            const outputs = await interop.apply(inputs, applyOpts)
+            wsState.markComplete()
+            this.ctx.storeWorkspaceOutputs(workspace, outputs)
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error)
+            wsState.markFailed(msg)
+            throw error
+          }
+        }
+        return workspace
+      }),
+    )
+
+    process.removeListener('SIGINT', onSigint)
+    renderer.stop()
+
+    this.handleLevelFailures(
+      results,
+      entries.map((e) => e.workspace),
+    )
+
+    return wsStates
+  }
+
+  private async applyLevelDirectly(workspaces: Workspace[], levelIndex: number): Promise<WorkspaceApplyState[]> {
+    logger.info(`Level ${levelIndex + 1} pre-approved, applying directly...`)
+
+    const entries: Array<{ workspace: Workspace; inputs: ProviderInput }> = []
+
+    for (const workspace of workspaces) {
+      if (this.ctx.isDestroy) {
+        const interop = this.ctx.interop(workspace)
+        const isDestroyed = await interop.isDestroyed()
+        if (isDestroyed) {
+          logger.info(`✅ ${workspace.name} is already destroyed.`)
+          continue
+        }
+        const inputs = await this.ctx.getInputs(workspace, { bestEffort: true })
+        entries.push({ workspace, inputs })
+      } else {
+        const inputs = await this.ctx.getInputs(workspace)
+        entries.push({ workspace, inputs })
+      }
+    }
+
+    if (entries.length === 0) {
+      logger.info('✅ No workspaces to apply in this level')
+      return []
+    }
+
+    return this.applyWorkspaces(entries, levelIndex)
+  }
+
   public async exec(opts: IExecOptions) {
     await this.validateEnv()
 
     const executionPlan = new ExecutionPlanBuilder(this.ctx).build()
+    const startIndex = await this.resolveStartLevel(executionPlan)
     logger.info(`\n Selected Environment: ${this.ctx.env}`)
 
-    for (let levelIndex = 0; levelIndex < executionPlan.levelsCount; levelIndex++) {
+    for (let levelIndex = startIndex; levelIndex < executionPlan.levelsCount; levelIndex++) {
       const level = executionPlan.levels[levelIndex]
 
       logger.info(`\n🔧 Processing Level ${levelIndex + 1}/${executionPlan.levelsCount}`)
       logger.info('=====================================')
 
-      const levelPlans = await this.gatherLevelPlans(level.workspaces)
+      if (isLevelApproved(opts.approve, levelIndex + 1)) {
+        const wsStates = await this.applyLevelDirectly(level.workspaces, levelIndex)
+        logger.info(`✅ Level ${levelIndex + 1} completed${formatLevelChangeSummary(wsStates)}`)
+        continue
+      }
+
+      const levelPlans = await this.gatherLevelPlans(level.workspaces, { savePlanFile: true })
 
       if (levelPlans.length === 0) {
         logger.info('✅ No changes needed in this level')
         continue
       }
 
-      if (isLevelApproved(opts.approve, levelIndex + 1)) {
-        this.logPlanSummary(levelIndex, levelPlans, opts.formatter)
-        logger.info(`Level ${levelIndex + 1} approved, applying...`)
-      } else {
-        this.logPlanSummary(levelIndex, levelPlans, opts.formatter, { skipFormattedPlan: true })
+      this.logPlanSummary(levelIndex, levelPlans, opts.formatter, { skipFormattedPlan: true })
 
-        let message = levelPlans
-          .map(({ workspace, inputs, plan }) => {
-            const formatted = opts.formatter.format(plan)
-            return `🏭 Workspace: ${workspace.name}\nInputs:\n${JSON.stringify(inputs, null, 2)}\nPlan:\n${formatted}`
-          })
-          .join('\n--------------------------------\n')
+      let message = levelPlans
+        .map(({ workspace, plan }) => {
+          const formatted = opts.formatter.format(plan)
+          return `${workspace.name}:\n${formatted}`
+        })
+        .join('\n\n')
 
-        message += '\n--------------------------------\n'
-        message += `Apply all workspaces in Level ${levelIndex + 1}?`
+      message += '\n--------------------------------\n'
+      message += `Apply all workspaces in Level ${levelIndex + 1}?`
 
-        const answer = await opts.integration.askForConfirmation(message)
+      const answer = await opts.integration.askForConfirmation(message)
 
-        if (!opts.integration.interactive) {
-          logger.info('Not interactive, waiting for confirmation and another cli execution')
-          return
-        }
-
-        if (!answer) {
-          logger.info('Aborting...')
-          return
-        }
+      if (!opts.integration.interactive) {
+        logger.info('Not interactive, waiting for confirmation and another cli execution')
+        return
       }
 
-      // Apply all workspaces in this level
-      logger.info(`\n🚀 Applying Level ${levelIndex + 1}...`)
-      const results = await Promise.allSettled(
-        levelPlans.map(async ({ workspace, inputs }) => {
-          const interop = this.ctx.interop(workspace)
-          if (this.ctx.isDestroy) {
-            logger.info(`   Destroying ${workspace.name}...`)
-            await interop.destroy(inputs)
-            this.ctx.storeDestroyedWorkspace(workspace)
-            logger.info(`   ✅ ${workspace.name} destroyed successfully`)
-          } else {
-            logger.info(`   Applying ${workspace.name}...`)
-            const applyOpts = workspace.skipPreview ? { skipPreview: true } : undefined
-            const outputs = await interop.apply(inputs, applyOpts)
-            this.ctx.storeWorkspaceOutputs(workspace, outputs)
-            logger.info(`   ✅ ${workspace.name} applied successfully`)
-          }
-          return workspace
-        }),
-      )
-
-      const failures = results
-        .map((r, i) => ({ result: r, workspace: levelPlans[i].workspace }))
-        .filter((x): x is { result: PromiseRejectedResult; workspace: Workspace } => x.result.status === 'rejected')
-
-      if (failures.length > 0) {
-        const failedNames = failures.map((f) => f.workspace.name)
-        const action = this.ctx.isDestroy ? 'destroy' : 'apply'
-        for (const { workspace, result } of failures) {
-          logger.error(`   Failed to ${action} ${workspace.name}: ${result.reason}`)
-        }
-        throw new UserError(
-          `Failed to ${action} workspaces: ${failedNames.join(', ')}. ` +
-            `If provider state is locked, run 'ig provider force-unlock <lock-id>' in each failed workspace.`,
-        )
+      if (!answer) {
+        logger.info('Aborting...')
+        return
       }
 
-      logger.info(`✅ Level ${levelIndex + 1} completed`)
+      const entries = levelPlans.map(({ workspace, inputs, plan }) => {
+        const entry: { workspace: Workspace; inputs: ProviderInput; planFile?: string } = { workspace, inputs }
+        if (plan.planFile) entry.planFile = plan.planFile
+        return entry
+      })
+      const wsStates = await this.applyWorkspaces(entries, levelIndex)
+
+      logger.info(`✅ Level ${levelIndex + 1} completed${formatLevelChangeSummary(wsStates)}`)
     }
 
     logger.info('\n--------------------------------')
@@ -301,12 +536,11 @@ export class MultistageExecutor {
           if (outputValue === undefined) {
             logger.warn(`Value to output ${exp.key} from workspace ${exp.workspace} is not found`)
           } else {
-            result[exp.name] = outputValue.value
+            result[exp.name] = outputValue.secret ? '[secret]' : outputValue.value
           }
         }
         logger.info('Outputs:')
         logger.info(JSON.stringify(result, null, 2))
-        logger.info('--------------------------------')
       }
     }
   }
@@ -468,7 +702,9 @@ function zero(): ChangeSummary {
 }
 
 function dump(changes: ChangeSummary): string {
-  return `Add: ${changes.add}, Change: ${changes.change}, Remove: ${changes.remove}, Replace: ${changes.replace}, Outputs: ${changes.outputUpdates}`
+  const parts = [`+${changes.add} ~${changes.change} -${changes.remove}`]
+  if (changes.replace > 0) parts.push(`±${changes.replace}`)
+  return parts.join(' ')
 }
 
 function add(changes1: ChangeSummary, changes2: ChangeSummary): ChangeSummary {
@@ -485,6 +721,14 @@ function isLevelApproved(approve: number[] | 'all' | undefined, level: number): 
   if (approve === undefined) return false
   if (approve === 'all') return true
   return approve.includes(level)
+}
+
+function formatLevelChangeSummary(wsStates: WorkspaceApplyState[]): string {
+  const add = wsStates.reduce((s, ws) => s + ws.addCount, 0)
+  const change = wsStates.reduce((s, ws) => s + ws.changeCount, 0)
+  const remove = wsStates.reduce((s, ws) => s + ws.removeCount, 0)
+  if (add === 0 && change === 0 && remove === 0) return ''
+  return `  +${add} ~${change} -${remove}`
 }
 
 export interface IExecOptions {

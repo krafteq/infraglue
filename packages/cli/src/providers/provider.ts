@@ -1,4 +1,5 @@
 import type { ProviderPlan } from './provider-plan.js'
+import type { ProviderEvent } from './provider-events.js'
 
 export interface OutputValue {
   value: string
@@ -40,19 +41,28 @@ export interface IProvider {
     configuration: ProviderConfig,
     input: ProviderInput,
     env: string,
-    options?: { detailed?: boolean; refresh?: boolean },
+    options?: { detailed?: boolean; refresh?: boolean; savePlanFile?: boolean },
   ): Promise<ProviderPlan>
   apply(
     configuration: ProviderConfig,
     input: ProviderInput,
     env: string,
-    options?: { skipPreview?: boolean },
+    options?: { onEvent?: (event: ProviderEvent) => void; planFile?: string },
   ): Promise<ProviderOutput>
   getOutputs(configuration: ProviderConfig, env: string): Promise<ProviderOutput>
-  // TODO: apply plan only
 
-  destroyPlan(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<ProviderPlan>
-  destroy(configuration: ProviderConfig, input: ProviderInput, env: string): Promise<void>
+  destroyPlan(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    env: string,
+    options?: { savePlanFile?: boolean },
+  ): Promise<ProviderPlan>
+  destroy(
+    configuration: ProviderConfig,
+    input: ProviderInput,
+    env: string,
+    options?: { onEvent?: (event: ProviderEvent) => void; planFile?: string },
+  ): Promise<void>
   isDestroyed(configuration: ProviderConfig, env: string): Promise<boolean>
 
   selectEnvironment(configuration: ProviderConfig, env: string): Promise<void>

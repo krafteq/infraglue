@@ -116,15 +116,14 @@ envs: # per-environment configuration
 
 ### Fields
 
-| Field          | Type                        | Required | Description                                                                                                                               |
-| -------------- | --------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `provider`     | `string`                    | No       | `terraform` or `pulumi`. Auto-detected if omitted (from `.tf` or `Pulumi.yaml` files)                                                     |
-| `injection`    | `Record<string, string>`    | No       | Map of variable names to `'../workspace:output_key'` references. Creates implicit dependency                                              |
-| `depends_on`   | `string[]`                  | No       | Explicit dependencies without output injection. Use relative paths like `'../workspace'`                                                  |
-| `alias`        | `string`                    | No       | Custom workspace name (defaults to directory name)                                                                                        |
-| `output`       | `Record<string, string>`    | No       | Remap provider output keys to different names                                                                                             |
-| `envs`         | `Record<string, EnvConfig>` | No       | Per-environment configuration (see below)                                                                                                 |
-| `skip_preview` | `boolean`                   | No       | Skip preview/plan and apply directly. Use for Pulumi providers that can't preview before first deploy (see [Skip Preview](#skip-preview)) |
+| Field        | Type                        | Required | Description                                                                                  |
+| ------------ | --------------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `provider`   | `string`                    | No       | `terraform` or `pulumi`. Auto-detected if omitted (from `.tf` or `Pulumi.yaml` files)        |
+| `injection`  | `Record<string, string>`    | No       | Map of variable names to `'../workspace:output_key'` references. Creates implicit dependency |
+| `depends_on` | `string[]`                  | No       | Explicit dependencies without output injection. Use relative paths like `'../workspace'`     |
+| `alias`      | `string`                    | No       | Custom workspace name (defaults to directory name)                                           |
+| `output`     | `Record<string, string>`    | No       | Remap provider output keys to different names                                                |
+| `envs`       | `Record<string, EnvConfig>` | No       | Per-environment configuration (see below)                                                    |
 
 ### Environment Config (EnvConfig)
 
@@ -177,6 +176,52 @@ envs:
 - A missing (unset) environment variable throws an error; empty string is valid
 - Structural fields (`workspace`, `injection`, `depends_on`, `alias`, `provider`, `output`) are NOT interpolated
 
+### Environment Variable Files
+
+ig loads `.env` files from the `.ig/` directory before config interpolation, so values are available for `${VAR}` substitution in ig.yaml and for provider subprocesses (Terraform/Pulumi).
+
+**Files loaded (in order):**
+
+1. `.ig/.env` — base variables, overrides `process.env`
+2. `.ig/.env.{envName}` — per-environment variables, overrides both
+
+Missing files are silently ignored. The `.ig/` directory is gitignored by default (its `.gitignore` contains `*`), making it safe for secrets and local overrides.
+
+**Format:**
+
+```text
+# Comments and blank lines are ignored
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+export API_KEY="my-secret-key"
+QUOTED_VALUE='single quotes work too'
+COMPLEX=value=with=equals
+```
+
+Supported syntax: `KEY=VALUE`, `KEY="quoted"`, `KEY='single quoted'`, `# comments`, blank lines, and `export` prefix.
+
+**Example usage:**
+
+```bash
+# .ig/.env — shared across all environments
+TF_STATE_BUCKET=my-terraform-state
+AWS_REGION=us-east-1
+
+# .ig/.env.prod — production-only overrides
+DATABASE_HOST=prod-db.example.com
+API_KEY=prod-secret-key
+```
+
+```yaml
+# ig.yaml — references are resolved from loaded .env files
+envs:
+  prod:
+    backend_config:
+      bucket: ${TF_STATE_BUCKET}
+    vars:
+      db_host: ${DATABASE_HOST}
+```
+
 ## Dependency Injection
 
 Workspaces wire outputs from upstream workspaces using the `injection` field:
@@ -203,6 +248,7 @@ ig plan --env dev --detailed          # show attribute-level diffs
 ig apply --env dev                    # apply all workspaces in dev environment
 ig apply --env dev --project postgres # apply only the postgres workspace
 ig apply --env dev --no-deps          # apply without running dependencies
+ig apply --env dev --start-with-project postgres  # skip upstream levels, use cached outputs
 ig destroy --env staging              # destroy all workspaces
 
 # Drift detection and reconciliation
@@ -248,11 +294,47 @@ ig install-skill --force              # overwrite existing
 | `1`     | Auto-approve level 1 only          |
 | `1,2,3` | Auto-approve specific levels       |
 
-Level numbers are 1-indexed. Without `--approve`, the command waits for interactive confirmation.
+Level numbers are 1-indexed. Without `--approve`, the command waits for interactive confirmation. Pre-approved levels skip the plan step entirely and apply directly (no `terraform plan`/`pulumi preview`), which is faster — especially for Pulumi where preview and up both run the program.
+
+**`--start-with-project <name>`** (for `ig apply`, `ig destroy`, `ig plan`):
+
+Skip all execution levels before the level containing the named project. Cached outputs from `.ig/state.json` are used for skipped workspaces instead of running provider commands. Useful for resuming partially-applied monorepos or iterating on a downstream workspace without re-running upstream.
+
+- Requires a prior full `ig apply` so that cached outputs exist in `.ig/state.json`
+- Mutually exclusive with `--project` and `--no-deps`
+- Level numbers in `--approve` still refer to the original plan levels
+- Errors if cached outputs are missing for any skipped workspace
 
 **Exit codes:** `0` = success / no changes, `1` = error, `2` = changes detected (plan/drift)
 
 **TTY detection:** when no TTY is detected (CI, piped output, agent subprocess), ig auto-selects the `no-tty-cli` integration which suppresses interactive prompts. `ig plan` and `ig drift` are always non-interactive.
+
+### Live Progress Display
+
+During `ig apply` and `ig destroy`, ig streams real-time progress from Terraform and Pulumi. Both providers emit NDJSON events when run with `--json`, which ig parses to show per-resource status.
+
+**TTY (default compact view)** — one line per workspace showing resource count, current operation, and elapsed time:
+
+```text
+  ok redis        2/5 resources   creating docker:index:Container  (3s)
+  ok postgres     1/3 resources   creating aws:rds:Instance  (15s)
+```
+
+**TTY verbose (`-v`)** — expanded per-resource detail:
+
+```text
+  * redis
+      ok docker:index:Image         pulled        0.8s
+      *  docker:index:Container     creating...   3s
+```
+
+**Non-TTY/CI** — append-only prefixed lines (no ANSI cursor codes):
+
+```text
+[redis] create docker_network.main
+[redis] create docker_network.main (12s)
+[postgres] error: aws_rds.main - DBInstanceAlreadyExists
+```
 
 ### Global Options
 
@@ -334,28 +416,7 @@ If `provider` is not set in a workspace's `ig.yaml`, ig detects it automatically
 
 ## Environment State
 
-The selected environment is stored in `.ig/.env` at the monorepo root. This file is created by `ig env select` and persists across commands. Pass `--env` to override without changing the stored selection.
-
-## Skip Preview
-
-Set `skip_preview: true` in a workspace's `ig.yaml` to bypass the preview/plan step and apply directly. This is useful for Pulumi workspaces that use providers connecting to services not yet deployed (e.g., a Pulumi program that configures a database created by another workspace — the preview would fail because the database doesn't exist yet).
-
-```yaml
-skip_preview: true
-
-envs:
-  dev:
-    backend_config:
-      PULUMI_BACKEND_URL: file://./state
-      PULUMI_CONFIG_PASSPHRASE: ''
-```
-
-When `skip_preview` is enabled:
-
-- `ig plan` skips the workspace entirely (no preview is run)
-- `ig apply` applies without running a preview first (Pulumi: `pulumi up --yes --skip-preview`)
-- `ig destroy` is unaffected (destroy preview still runs)
-- The workspace still participates in dependency resolution and output injection
+The selected environment is stored in `.ig/state.json` at the monorepo root. This file is created by `ig env select` and persists across commands. Pass `--env` to override without changing the stored selection.
 
 ## Output-Only Change Detection
 

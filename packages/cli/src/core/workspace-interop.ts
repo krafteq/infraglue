@@ -1,5 +1,12 @@
 import { type Monorepo, Workspace } from './model.js'
-import type { IProvider, ProviderConfig, ProviderInput, ProviderOutput, ProviderPlan } from '../providers/index.js'
+import type {
+  IProvider,
+  ProviderConfig,
+  ProviderInput,
+  ProviderOutput,
+  ProviderPlan,
+  ProviderEvent,
+} from '../providers/index.js'
 import { StateManager } from './state-manager.js'
 import { logger } from '../utils/index.js'
 import { globalConfig } from './global-config.js'
@@ -29,7 +36,7 @@ export class WorkspaceInterop {
       const state = await this.stateManager.read()
       const cachedOutputs = state.workspace(this.workspace.name).outputs
       if (cachedOutputs) {
-        logger.info(`Getting stale outputs for workspace ${this.workspace.name}`)
+        logger.debug(`Getting stale outputs for workspace ${this.workspace.name}`)
         return { outputs: cachedOutputs, actual: false }
       }
     }
@@ -39,22 +46,31 @@ export class WorkspaceInterop {
     return { outputs, actual: true }
   }
 
-  public getPlan(input: ProviderInput, options?: { detailed?: boolean; refresh?: boolean }): Promise<ProviderPlan> {
+  public getPlan(
+    input: ProviderInput,
+    options?: { detailed?: boolean; refresh?: boolean; savePlanFile?: boolean },
+  ): Promise<ProviderPlan> {
     return this.provider.getPlan(this.providerConfig(), input, this.env, options)
   }
 
-  public async apply(input: ProviderInput, options?: { skipPreview?: boolean }): Promise<ProviderOutput> {
+  public async apply(
+    input: ProviderInput,
+    options?: { onEvent?: (event: ProviderEvent) => void; planFile?: string },
+  ): Promise<ProviderOutput> {
     const outputs = await this.provider.apply(this.providerConfig(), input, this.env, options)
     await this.storeOutputs(outputs)
     return outputs
   }
 
-  public destroyPlan(input: ProviderInput): Promise<ProviderPlan> {
-    return this.provider.destroyPlan(this.providerConfig(), input, this.env)
+  public destroyPlan(input: ProviderInput, options?: { savePlanFile?: boolean }): Promise<ProviderPlan> {
+    return this.provider.destroyPlan(this.providerConfig(), input, this.env, options)
   }
 
-  public destroy(input: ProviderInput): Promise<void> {
-    return this.provider.destroy(this.providerConfig(), input, this.env)
+  public destroy(
+    input: ProviderInput,
+    options?: { onEvent?: (event: ProviderEvent) => void; planFile?: string },
+  ): Promise<void> {
+    return this.provider.destroy(this.providerConfig(), input, this.env, options)
   }
 
   public isDestroyed(): Promise<boolean> {
@@ -63,9 +79,9 @@ export class WorkspaceInterop {
 
   public async selectEnvironment(): Promise<void> {
     await this.storeOutputs(null)
-    logger.info(`Selecting environment for ${this.workspace.name}`)
+    logger.debug(`Selecting environment for ${this.workspace.name}`)
     await this.provider.selectEnvironment(this.providerConfig(), this.env)
-    logger.info(`Selected environment for ${this.workspace.name}`)
+    logger.debug(`Selected environment for ${this.workspace.name}`)
   }
 
   public existsInFolder(folderPath: string): Promise<boolean> {

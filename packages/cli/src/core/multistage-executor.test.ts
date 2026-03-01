@@ -8,6 +8,13 @@ import {
 } from './multistage-executor.js'
 import { ExecutionContext, Monorepo, Workspace, AppliedWorkspace } from './model.js'
 import { MockProvider, createProviderPlan } from '../__test-utils__/mock-provider.js'
+import { ProviderError, formatProviderErrorMessage } from '../utils/index.js'
+import { extractTerraformDiagnostics, extractPulumiDiagnostics } from '../providers/diagnostic-extraction.js'
+import {
+  TERRAFORM_ERROR_OUTPUT,
+  TERRAFORM_ERROR_WITH_WARNINGS,
+  PULUMI_ERROR_BLOB,
+} from '../__test-utils__/provider-fixtures.js'
 import { State } from './state-manager.js'
 import type { IIntegration } from '../integrations/integration.js'
 import type { IFormatter } from '../formatters/formatter.js'
@@ -162,33 +169,6 @@ describe('MultistageExecutor', () => {
       await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
 
       expect(ctx.findAppliedOutput('ws1', 'key')).toEqual({ value: 'applied-value', secret: false })
-    })
-
-    it('should skip preview and apply directly when skipPreview is true', async () => {
-      envSelected()
-      const ws1 = new Workspace(
-        'ws1',
-        '/path/to/ws1',
-        '/root',
-        createMockProvider(),
-        {},
-        [],
-        { dev: {} },
-        {},
-        true, // skipPreview
-      )
-      const monorepo = new Monorepo('/root', [ws1], [], undefined)
-      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
-      const executor = new MultistageExecutor(ctx)
-
-      mockApply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
-
-      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
-
-      // getPlan should not be called (preview is skipped)
-      expect(mockGetPlan).not.toHaveBeenCalled()
-      // apply should be called
-      expect(mockApply).toHaveBeenCalledOnce()
     })
 
     it('should skip and cache outputs when no changes', async () => {
@@ -515,6 +495,118 @@ describe('MultistageExecutor', () => {
 
       expect(mockApply).toHaveBeenCalledTimes(2)
     })
+
+    describe('ProviderError diagnostic output', () => {
+      let stderrSpy: ReturnType<typeof vi.spyOn>
+
+      beforeEach(() => {
+        stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+      })
+
+      afterEach(() => {
+        stderrSpy.mockRestore()
+      })
+
+      function capturedOutput(): string {
+        return stderrSpy.mock.calls.map((call) => String(call[0])).join('')
+      }
+
+      it('should log clean Terraform diagnostic on apply failure', async () => {
+        envSelected()
+        const ws1 = createWs('ws1')
+        const monorepo = new Monorepo('/root', [ws1], [], undefined)
+        const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+        const executor = new MultistageExecutor(ctx)
+
+        mockGetPlan.mockResolvedValue(
+          createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+        )
+
+        const diagnostics = extractTerraformDiagnostics(TERRAFORM_ERROR_OUTPUT, '')
+        const message = formatProviderErrorMessage('Terraform', 'ws1', diagnostics, 'terraform apply --json')
+        mockApply.mockRejectedValue(new ProviderError(message, 'terraform', 'ws1', { diagnostics }))
+
+        await expect(
+          executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+        ).rejects.toThrow('Failed to apply workspaces')
+
+        const output = capturedOutput()
+        expect(output).toContain('\u2718 error creating S3 Bucket: BucketAlreadyExists (aws_s3_bucket.main)')
+        expect(output).toContain('Run with -v')
+        expect(output).not.toContain('"type":"diagnostic"')
+      })
+
+      it('should log clean Pulumi diagnostic on apply failure', async () => {
+        envSelected()
+        const ws1 = createWs('ws1')
+        const monorepo = new Monorepo('/root', [ws1], [], undefined)
+        const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+        const executor = new MultistageExecutor(ctx)
+
+        mockGetPlan.mockResolvedValue(
+          createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+        )
+
+        const diagnostics = extractPulumiDiagnostics(PULUMI_ERROR_BLOB, '')
+        const message = formatProviderErrorMessage('Pulumi', 'ws1', diagnostics, 'pulumi up --yes')
+        mockApply.mockRejectedValue(new ProviderError(message, 'pulumi', 'ws1', { diagnostics }))
+
+        await expect(
+          executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+        ).rejects.toThrow('Failed to apply workspaces')
+
+        const output = capturedOutput()
+        expect(output).toContain('\u2718 error creating S3 Bucket: BucketAlreadyExists')
+        expect(output).toContain('Run with -v')
+      })
+
+      it('should show only errors when mixed severities exist', async () => {
+        envSelected()
+        const ws1 = createWs('ws1')
+        const monorepo = new Monorepo('/root', [ws1], [], undefined)
+        const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+        const executor = new MultistageExecutor(ctx)
+
+        mockGetPlan.mockResolvedValue(
+          createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+        )
+
+        const diagnostics = extractTerraformDiagnostics(TERRAFORM_ERROR_WITH_WARNINGS, '')
+        const message = formatProviderErrorMessage('Terraform', 'ws1', diagnostics, 'terraform destroy --json')
+        mockApply.mockRejectedValue(new ProviderError(message, 'terraform', 'ws1', { diagnostics }))
+
+        await expect(
+          executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+        ).rejects.toThrow('Failed to apply workspaces')
+
+        const output = capturedOutput()
+        expect(output).toContain('\u2718 error creating S3 Bucket: BucketAlreadyExists')
+        expect(output).not.toContain('Deprecated attribute')
+      })
+
+      it('should show command fallback when no diagnostics', async () => {
+        envSelected()
+        const ws1 = createWs('ws1')
+        const monorepo = new Monorepo('/root', [ws1], [], undefined)
+        const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+        const executor = new MultistageExecutor(ctx)
+
+        mockGetPlan.mockResolvedValue(
+          createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+        )
+
+        const message = formatProviderErrorMessage('Terraform', 'ws1', [], 'terraform apply --json')
+        mockApply.mockRejectedValue(new ProviderError(message, 'terraform', 'ws1', { diagnostics: [] }))
+
+        await expect(
+          executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+        ).rejects.toThrow('Failed to apply workspaces')
+
+        const output = capturedOutput()
+        expect(output).toContain('Command: terraform apply --json')
+        expect(output).toContain('Run with -v')
+      })
+    })
   })
 
   describe('monorepo exports', () => {
@@ -714,8 +806,73 @@ describe('MultistageExecutor', () => {
     })
   })
 
-  describe('--approve flag', () => {
-    it('should auto-apply when --approve matches level index (non-interactive)', async () => {
+  describe('parallel plan gathering', () => {
+    it('should plan multiple workspaces in a level in parallel', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(true)
+      expect(mockGetPlan).toHaveBeenCalledTimes(2)
+    })
+
+    it('should handle mixed results — one workspace has changes, one is up to date', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      let planCallCount = 0
+      mockGetPlan.mockImplementation(async () => {
+        planCallCount++
+        if (planCallCount === 1) return createProviderPlan()
+        return createProviderPlan({
+          changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+        })
+      })
+      mockGetOutputs.mockResolvedValue({ outputs: { key: { value: 'val', secret: false } }, actual: true })
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(true)
+      expect(mockGetPlan).toHaveBeenCalledTimes(2)
+    })
+
+    it('should throw combined error when plan fails for a workspace', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      let planCallCount = 0
+      mockGetPlan.mockImplementation(async () => {
+        planCallCount++
+        if (planCallCount === 1) throw new Error('terraform init failed')
+        return createProviderPlan({
+          changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+        })
+      })
+
+      await expect(executor.plan({ formatter: createFormatter() })).rejects.toThrow('Failed to plan workspaces')
+
+      // Both workspaces should have been attempted
+      expect(mockGetPlan).toHaveBeenCalledTimes(2)
+    })
+
+    it('should run single-workspace level sequentially without renderer', async () => {
       envSelected()
       const ws1 = createWs('ws1')
       const monorepo = new Monorepo('/root', [ws1], [], undefined)
@@ -725,30 +882,45 @@ describe('MultistageExecutor', () => {
       mockGetPlan.mockResolvedValue(
         createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
       )
+
+      const result = await executor.plan({ formatter: createFormatter() })
+
+      expect(result.hasChanges).toBe(true)
+      expect(mockGetPlan).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('--approve flag', () => {
+    it('should skip plan and apply directly when --approve matches level (non-interactive)', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
       mockApply.mockResolvedValue({})
 
       const integration = createNonInteractiveIntegration()
       await executor.exec({ formatter: createFormatter(), integration, approve: [1] })
 
+      expect(mockGetPlan).not.toHaveBeenCalled()
       expect(integration.askForConfirmation).not.toHaveBeenCalled()
       expect(mockApply).toHaveBeenCalledOnce()
     })
 
-    it('should auto-apply when --approve matches level index (interactive)', async () => {
+    it('should skip plan and apply directly when --approve matches level (interactive)', async () => {
       envSelected()
       const ws1 = createWs('ws1')
       const monorepo = new Monorepo('/root', [ws1], [], undefined)
       const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
       const executor = new MultistageExecutor(ctx)
 
-      mockGetPlan.mockResolvedValue(
-        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
-      )
       mockApply.mockResolvedValue({})
 
       const integration = createInteractiveIntegration()
       await executor.exec({ formatter: createFormatter(), integration, approve: [1] })
 
+      expect(mockGetPlan).not.toHaveBeenCalled()
       expect(integration.askForConfirmation).not.toHaveBeenCalled()
       expect(mockApply).toHaveBeenCalledOnce()
     })
@@ -772,7 +944,7 @@ describe('MultistageExecutor', () => {
       expect(mockApply).not.toHaveBeenCalled()
     })
 
-    it('should auto-approve all levels with --approve all', async () => {
+    it('should skip plan for all levels with --approve all', async () => {
       envSelected()
       const ws1 = createWs('ws1')
       const ws2 = createWs('ws2', ['ws1'])
@@ -780,19 +952,17 @@ describe('MultistageExecutor', () => {
       const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
       const executor = new MultistageExecutor(ctx)
 
-      mockGetPlan.mockResolvedValue(
-        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
-      )
       mockApply.mockResolvedValue({})
 
       const integration = createNonInteractiveIntegration()
       await executor.exec({ formatter: createFormatter(), integration, approve: 'all' })
 
+      expect(mockGetPlan).not.toHaveBeenCalled()
       expect(integration.askForConfirmation).not.toHaveBeenCalled()
       expect(mockApply).toHaveBeenCalledTimes(2)
     })
 
-    it('should auto-approve only specified levels with --approve 1,2', async () => {
+    it('should skip plan only for approved levels with --approve 1,2', async () => {
       envSelected()
       const ws1 = createWs('ws1')
       const ws2 = createWs('ws2', ['ws1'])
@@ -810,10 +980,149 @@ describe('MultistageExecutor', () => {
       // Approve levels 1 and 2, but not level 3
       await executor.exec({ formatter: createFormatter(), integration, approve: [1, 2] })
 
-      // Levels 1 and 2 should be auto-approved and applied
+      // Levels 1 and 2 should be directly applied (no plan), level 3 plans normally
       expect(mockApply).toHaveBeenCalledTimes(2)
+      // getPlan only called for level 3 (the non-approved level)
+      expect(mockGetPlan).toHaveBeenCalledOnce()
       // Level 3 should trigger askForConfirmation and stop (non-interactive)
       expect(integration.askForConfirmation).toHaveBeenCalledOnce()
+    })
+
+    it('should apply without planFile when level is pre-approved', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockApply.mockResolvedValue({ key: { value: 'val', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration(), approve: [1] })
+
+      expect(mockApply).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.objectContaining({ planFile: expect.anything() }),
+      )
+    })
+
+    it('should store outputs after direct apply', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockApply.mockResolvedValue({ key: { value: 'applied-value', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration(), approve: [1] })
+
+      expect(ctx.findAppliedOutput('ws1', 'key')).toEqual({ value: 'applied-value', secret: false })
+    })
+
+    it('should skip destroyed workspaces in direct apply (destroy path)', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockIsDestroyed.mockResolvedValue(true)
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration(), approve: [1] })
+
+      expect(mockGetPlan).not.toHaveBeenCalled()
+      expect(mockDestroyPlan).not.toHaveBeenCalled()
+      expect(mockDestroy).not.toHaveBeenCalled()
+    })
+
+    it('should destroy directly when level is pre-approved', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockIsDestroyed.mockResolvedValue(false)
+      mockDestroy.mockResolvedValue(undefined)
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration(), approve: [1] })
+
+      expect(mockDestroyPlan).not.toHaveBeenCalled()
+      expect(mockDestroy).toHaveBeenCalledOnce()
+      // No planFile should be passed
+      expect(mockDestroy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.objectContaining({ planFile: expect.anything() }),
+      )
+    })
+
+    it('should handle failures in direct apply', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      let applyCallCount = 0
+      mockApply.mockImplementation(async () => {
+        applyCallCount++
+        if (applyCallCount === 1) throw new Error('apply failed')
+        return { key: { value: 'val', secret: false } }
+      })
+
+      await expect(
+        executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration(), approve: [1] }),
+      ).rejects.toThrow('Failed to apply workspaces')
+
+      // Both workspaces attempted apply
+      expect(mockApply).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('streaming', () => {
+    it('should pass onEvent callback to interop.apply', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockApply.mockResolvedValue({})
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      expect(mockApply).toHaveBeenCalledOnce()
+      const callArgs = mockApply.mock.calls[0]
+      // Second arg is options containing onEvent
+      expect(callArgs[1]).toHaveProperty('onEvent')
+      expect(typeof callArgs[1].onEvent).toBe('function')
+    })
+
+    it('should pass onEvent callback to interop.destroy', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockIsDestroyed.mockResolvedValue(false)
+      mockDestroyPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 0, change: 0, remove: 1, replace: 0, outputUpdates: 0 } }),
+      )
+      mockDestroy.mockResolvedValue(undefined)
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      expect(mockDestroy).toHaveBeenCalled()
+      const callArgs = mockDestroy.mock.calls[0]
+      // Second arg is options containing onEvent
+      expect(callArgs[1]).toHaveProperty('onEvent')
+      expect(typeof callArgs[1].onEvent).toBe('function')
     })
   })
 
@@ -1120,6 +1429,321 @@ describe('MultistageExecutor', () => {
       await expect(executor.refreshState()).rejects.toThrow(
         'Cannot execute: environments across workspaces are in inconsistent state',
       )
+    })
+  })
+
+  describe('plan file reuse', () => {
+    it('should pass savePlanFile to getPlan during exec', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      const plan = createProviderPlan({
+        changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+        planFile: '.ig/.temp/ws1/ig-plan.bin',
+      })
+      mockGetPlan.mockResolvedValue(plan)
+      mockApply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      expect(mockGetPlan).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ savePlanFile: true }))
+    })
+
+    it('should pass planFile from plan to apply', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      const plan = createProviderPlan({
+        changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+        planFile: '.ig/.temp/ws1/ig-plan.bin',
+      })
+      mockGetPlan.mockResolvedValue(plan)
+      mockApply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      expect(mockApply).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ planFile: '.ig/.temp/ws1/ig-plan.bin' }),
+      )
+    })
+
+    it('should pass planFile from destroy plan to destroy', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockIsDestroyed.mockResolvedValue(false)
+      const plan = createProviderPlan({
+        changeSummary: { add: 0, change: 0, remove: 1, replace: 0, outputUpdates: 0 },
+        planFile: '.ig/.temp/ws1/ig-destroy-plan.bin',
+      })
+      mockDestroyPlan.mockResolvedValue(plan)
+      mockDestroy.mockResolvedValue(undefined)
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      expect(mockDestroyPlan).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ savePlanFile: true }))
+      expect(mockDestroy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ planFile: '.ig/.temp/ws1/ig-destroy-plan.bin' }),
+      )
+    })
+
+    it('should call apply without planFile when plan has none (Pulumi)', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      const plan = createProviderPlan({
+        changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+      })
+      mockGetPlan.mockResolvedValue(plan)
+      mockApply.mockResolvedValue({ url: { value: 'http://localhost', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      expect(mockApply).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.objectContaining({ planFile: expect.anything() }),
+      )
+    })
+
+    it('should not pass savePlanFile during plan-only (preview)', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      await executor.plan({ formatter: createFormatter() })
+
+      expect(mockGetPlan).toHaveBeenCalledWith(expect.anything(), undefined)
+    })
+  })
+
+  describe('--start-with-project', () => {
+    function envSelectedWithOutputs(
+      workspaceOutputs: Record<string, Record<string, { value: string; secret: boolean }>>,
+      env = 'dev',
+    ) {
+      const wsNames = Object.keys(workspaceOutputs)
+      const state = new State()
+      state.startSelectingEnv(env)
+      state.finishEnvSelection(wsNames)
+      state.restore({
+        current_environment: env,
+        workspaces: Object.fromEntries(
+          Object.entries(workspaceOutputs).map(([name, outputs]) => [name, { env, outputs }]),
+        ),
+      })
+      mockRead.mockResolvedValue(state)
+    }
+
+    it('should skip levels before target workspace during apply', async () => {
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+
+      envSelectedWithOutputs({
+        ws1: { net: { value: 'dev_net', secret: false } },
+        ws2: {},
+      })
+
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev', ws2)
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockApply.mockResolvedValue({ db: { value: 'localhost', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      // getPlan should only be called once (for ws2, not ws1)
+      expect(mockGetPlan).toHaveBeenCalledTimes(1)
+      expect(mockApply).toHaveBeenCalledTimes(1)
+    })
+
+    it('should pre-populate cached outputs for skipped workspaces', async () => {
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+
+      envSelectedWithOutputs({
+        ws1: { net: { value: 'dev_net', secret: false } },
+        ws2: {},
+      })
+
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev', ws2)
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockApply.mockResolvedValue({ db: { value: 'localhost', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      // Skipped ws1 should have its cached outputs available
+      expect(ctx.findAppliedOutput('ws1', 'net')).toEqual({ value: 'dev_net', secret: false })
+    })
+
+    it('should error when cached outputs missing for skipped dependency', async () => {
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+
+      // ws1 has no cached outputs
+      envSelectedWithOutputs({ ws1: {}, ws2: {} })
+      // Override to remove outputs for ws1
+      const state = new State()
+      state.startSelectingEnv('dev')
+      state.finishEnvSelection(['ws1', 'ws2'])
+      mockRead.mockResolvedValue(state)
+
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev', ws2)
+      const executor = new MultistageExecutor(ctx)
+
+      await expect(
+        executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+      ).rejects.toThrow("Cannot skip to 'ws2': missing cached outputs for skipped workspaces: ws1")
+    })
+
+    it('should work with destroy (reverse level order)', async () => {
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+
+      // In destroy mode, levels are reversed: ws2 is level 1, ws1 is level 2
+      // So --start-with-project ws1 should skip ws2 (level 1 in destroy order)
+      envSelectedWithOutputs({
+        ws1: { net: { value: 'dev_net', secret: false } },
+        ws2: { db: { value: 'localhost', secret: false } },
+      })
+
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev', ws1)
+      const executor = new MultistageExecutor(ctx)
+
+      mockIsDestroyed.mockResolvedValue(false)
+      mockDestroyPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 0, change: 0, remove: 1, replace: 0, outputUpdates: 0 } }),
+      )
+      mockDestroy.mockResolvedValue(undefined)
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      // Only ws1 should be destroyed (ws2 is in an earlier level in destroy order and should be skipped)
+      expect(mockDestroy).toHaveBeenCalledTimes(1)
+    })
+
+    it('should not skip anything when target is already in level 1', async () => {
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+
+      envSelectedWithOutputs({
+        ws1: { net: { value: 'dev_net', secret: false } },
+        ws2: {},
+      })
+
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev', ws1)
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockApply.mockResolvedValue({ net: { value: 'dev_net', secret: false } })
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      // Both levels processed (ws1 in level 1, ws2 in level 2)
+      expect(mockGetPlan).toHaveBeenCalledTimes(2)
+      expect(mockApply).toHaveBeenCalledTimes(2)
+    })
+
+    it('should preserve original level numbers in --approve', async () => {
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const ws3 = createWs('ws3', ['ws2'])
+      const monorepo = new Monorepo('/root', [ws1, ws2, ws3], [], undefined)
+
+      envSelectedWithOutputs({
+        ws1: { net: { value: 'dev_net', secret: false } },
+        ws2: { db: { value: 'localhost', secret: false } },
+        ws3: {},
+      })
+
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev', ws2)
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockApply.mockResolvedValue({ out: { value: 'val', secret: false } })
+
+      // Approve level 2 (ws2 is in level 2 of the original plan) — should auto-approve
+      await executor.exec({
+        formatter: createFormatter(),
+        integration: createInteractiveIntegration(),
+        approve: [2, 3],
+      })
+
+      // Both levels 2 and 3 should be directly applied (no plan)
+      expect(mockGetPlan).not.toHaveBeenCalled()
+      expect(mockApply).toHaveBeenCalledTimes(2)
+    })
+
+    it('should error when target workspace not in execution plan', async () => {
+      const ws1 = createWs('ws1')
+      const wsUnrelated = createWs('unrelated', [], ['prod']) // not in dev env
+      const monorepo = new Monorepo('/root', [ws1, wsUnrelated], [], undefined)
+
+      envSelectedWithOutputs({ ws1: {} })
+
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev', wsUnrelated)
+      const executor = new MultistageExecutor(ctx)
+
+      await expect(
+        executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() }),
+      ).rejects.toThrow("Workspace 'unrelated' not found in the execution plan")
+    })
+
+    it('should skip levels before target workspace during plan', async () => {
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+
+      envSelectedWithOutputs({
+        ws1: { net: { value: 'dev_net', secret: false } },
+        ws2: {},
+      })
+
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev', ws2)
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      await executor.plan({ formatter: createFormatter() })
+
+      // Only ws2 should be planned
+      expect(mockGetPlan).toHaveBeenCalledTimes(1)
     })
   })
 })

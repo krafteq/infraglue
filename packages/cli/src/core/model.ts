@@ -12,6 +12,7 @@ export class ExecutionContext {
     public readonly ignoreDependencies: boolean,
     public readonly isDestroy: boolean,
     public readonly env: string,
+    public readonly startWithWorkspace?: Workspace | undefined,
   ) {}
 
   public interop(workspace: Workspace): WorkspaceInterop {
@@ -183,7 +184,6 @@ export class Workspace {
     public readonly dependsOn: string[],
     public readonly envs: Record<string, EnvironmentConfig>,
     public readonly rootVars: Record<string, string> = {},
-    public readonly skipPreview: boolean = false,
   ) {
     this.allDependsOn = [
       ...new Set(

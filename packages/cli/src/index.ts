@@ -2,7 +2,7 @@
 
 import { Command, Help } from 'commander'
 import { dirname, join, resolve } from 'path'
-import { readFile } from 'fs/promises'
+import { readFile, access } from 'fs/promises'
 import {
   globalConfig,
   EnvManager,
@@ -46,22 +46,23 @@ program
   )
   .description('CLI tool for infra-glue')
   .version(await getPackageJsonVersion())
-  .hook('preAction', async (command) => {
-    if (command.opts().verbose || isDebug()) {
+  .hook('preAction', async (thisCommand, actionCommand) => {
+    if (thisCommand.opts().verbose || isDebug()) {
       logger.setVerbose()
     }
-    if (command.opts().quiet) {
+    if (thisCommand.opts().quiet) {
       logger.setQuiet()
     }
-    if (command.opts().strict) {
+    if (thisCommand.opts().strict) {
       globalConfig.strict = true
     }
     const disableStateOutputs = process.env['IG_DISABLE_STATE_OUTPUTS']
     if (disableStateOutputs === '1' || disableStateOutputs === 'true') {
       globalConfig.disableStateOutputs = true
     }
-    currentDir = resolve(command.opts().directory)
-    monorepo = await tryResolveMonorepo(currentDir)
+    currentDir = resolve(thisCommand.opts().directory)
+    const envName = actionCommand?.opts?.()?.env ?? (await peekStateEnv(currentDir))
+    monorepo = await tryResolveMonorepo(currentDir, envName)
   })
 
 const envCommand = program.command('env')
@@ -87,6 +88,7 @@ interface IApplyOptions {
   approve?: number[] | 'all'
   env: string
   project?: string
+  startWithProject?: string
 }
 
 const execCommands = [
@@ -102,6 +104,7 @@ program
   .option('-e, --env <env>', 'Environment to plan')
   .option('--no-deps', 'Ignore dependencies')
   .option('--detailed', 'Show attribute-level diffs for changed resources')
+  .option('--start-with-project <project>', 'Skip levels before this project, use cached outputs')
   .action(
     async ({
       format,
@@ -109,16 +112,27 @@ program
       project,
       deps,
       detailed,
+      startWithProject,
     }: {
       format?: string
       env: string
       project?: string
       deps: boolean
       detailed?: boolean
+      startWithProject?: string
     }) => {
       const monorepo = requireMonorepo()
       env = await resolveEnv(env)
-      const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, false, env)
+      validateStartWithProject(startWithProject, project, deps)
+      const startWithWorkspace = startWithProject ? monorepo.getWorkspace(startWithProject) : undefined
+      const execContext = new ExecutionContext(
+        monorepo,
+        currentWorkspace(project),
+        !deps,
+        false,
+        env,
+        startWithWorkspace,
+      )
       const result = await new MultistageExecutor(execContext).plan({
         formatter: getFormatter(format),
         detailed: detailed ?? false,
@@ -153,19 +167,39 @@ for (const execCmd of execCommands) {
     .option('-p, --project <project>', 'Project to apply')
     .option('-e, --env <env>', 'environment to apply. If provided, the environment will be selected before applying')
     .option('--no-deps', 'Ignore dependencies')
-    .action(async ({ format, integration, approve, env, project, deps }: IApplyOptions & { deps: boolean }) => {
-      const monorepo = requireMonorepo()
-      env = await resolveEnv(env)
+    .option('--start-with-project <project>', 'Skip levels before this project, use cached outputs')
+    .action(
+      async ({
+        format,
+        integration,
+        approve,
+        env,
+        project,
+        deps,
+        startWithProject,
+      }: IApplyOptions & { deps: boolean }) => {
+        const monorepo = requireMonorepo()
+        env = await resolveEnv(env)
+        validateStartWithProject(startWithProject, project, deps)
+        const startWithWorkspace = startWithProject ? monorepo.getWorkspace(startWithProject) : undefined
 
-      const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, execCmd.isDestroy, env)
+        const execContext = new ExecutionContext(
+          monorepo,
+          currentWorkspace(project),
+          !deps,
+          execCmd.isDestroy,
+          env,
+          startWithWorkspace,
+        )
 
-      await new MultistageExecutor(execContext).exec({
-        approve: approve,
-        integration: getIntegration(detectIntegration(integration)),
-        formatter: getFormatter(format),
-        preview: false,
-      })
-    })
+        await new MultistageExecutor(execContext).exec({
+          approve: approve,
+          integration: getIntegration(detectIntegration(integration)),
+          formatter: getFormatter(format),
+          preview: false,
+        })
+      },
+    )
 }
 
 const configCommand = program.command('config')
@@ -302,7 +336,7 @@ program
   .description('Import an existing cloud resource into infrastructure state')
   .argument('<args...>', 'Arguments to pass to the provider import command')
   .requiredOption('-p, --project <project>', 'Project to import into')
-  .requiredOption('-e, --env <env>', 'Environment to use')
+  .option('-e, --env <env>', 'Environment to use')
   .addHelpText(
     'after',
     `
@@ -310,7 +344,7 @@ Examples:
   $ ig import aws_instance.web i-1234567890abcdef0 --project webserver --env staging
   $ ig import 'aws:ec2/instance:Instance' web i-1234567890abcdef0 --project webserver --env staging`,
   )
-  .action(async (args: string[], { env, project }: { env: string; project: string }) => {
+  .action(async (args: string[], { env, project }: { env?: string; project: string }) => {
     const monorepo = requireMonorepo()
     env = await resolveEnv(env)
     const ws = requireCurrentWorkspace(project)
@@ -325,7 +359,7 @@ program
   .description('Generate code for imported or existing cloud resources')
   .argument('<args...>', 'Arguments to pass to the provider generate-code command')
   .requiredOption('-p, --project <project>', 'Project to generate code for')
-  .requiredOption('-e, --env <env>', 'Environment to use')
+  .option('-e, --env <env>', 'Environment to use')
   .addHelpText(
     'after',
     `
@@ -333,7 +367,7 @@ Examples:
   $ ig export aws_instance.web i-1234567890abcdef0 --project webserver --env staging
   $ ig export 'aws:ec2/instance:Instance' web i-1234567890abcdef0 --project webserver --env staging`,
   )
-  .action(async (args: string[], { env, project }: { env: string; project: string }) => {
+  .action(async (args: string[], { env, project }: { env?: string; project: string }) => {
     const monorepo = requireMonorepo()
     env = await resolveEnv(env)
     const ws = requireCurrentWorkspace(project)
@@ -392,7 +426,8 @@ Examples:
   $ ig ${execCmd.name} --env production --approve 1
   $ ig ${execCmd.name} --env production --approve 1,2,3
   $ ig ${execCmd.name} --env production --approve all
-  $ ig ${execCmd.name} --env dev --project postgres`,
+  $ ig ${execCmd.name} --env dev --project postgres
+  $ ig ${execCmd.name} --env dev --start-with-project postgres --approve all`,
   )
 }
 
@@ -416,6 +451,21 @@ program.configureHelp({
     return defaultHelp
   },
 })
+
+async function peekStateEnv(startPath: string): Promise<string | undefined> {
+  for (let current = resolve(startPath); current !== dirname(current); current = dirname(current)) {
+    const stateFile = join(current, '.ig', 'state.json')
+    try {
+      await access(stateFile)
+      const content = await readFile(stateFile, 'utf-8')
+      const state = JSON.parse(content) as { current_environment?: string }
+      return state.current_environment ?? undefined
+    } catch {
+      continue
+    }
+  }
+  return undefined
+}
 
 async function resolveEnv(env?: string | undefined): Promise<string> {
   if (env) {
@@ -449,6 +499,16 @@ function currentWorkspace(project?: string | undefined): Workspace | undefined {
   }
 
   return undefined
+}
+
+function validateStartWithProject(startWithProject?: string, project?: string, deps?: boolean) {
+  if (!startWithProject) return
+  if (project) {
+    throw new UserError('--start-with-project and --project are mutually exclusive.')
+  }
+  if (deps === false) {
+    throw new UserError('--start-with-project and --no-deps are mutually exclusive.')
+  }
 }
 
 function requireCurrentWorkspace(project?: string | undefined): Workspace {

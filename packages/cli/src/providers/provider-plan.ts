@@ -76,6 +76,7 @@ export interface ProviderPlan {
   readonly diagnostics: Diagnostic[]
   readonly changeSummary: ChangeSummary
   readonly metadata: Record<string, unknown>
+  readonly planFile?: string
 }
 
 export function hasChanges(plan: ProviderPlan) {
