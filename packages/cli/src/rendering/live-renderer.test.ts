@@ -26,7 +26,7 @@ describe('formatCompactLine', () => {
 
     const line = formatCompactLine(ws)
     expect(line).toContain('redis')
-    expect(line).toContain('1/2 resources')
+    expect(line).toContain('1/2')
     expect(line).toContain('creating')
   })
 

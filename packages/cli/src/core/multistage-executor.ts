@@ -367,7 +367,7 @@ export class MultistageExecutor {
   private async applyWorkspaces(
     entries: Array<{ workspace: Workspace; inputs: ProviderInput; planFile?: string }>,
     levelIndex: number,
-  ): Promise<void> {
+  ): Promise<WorkspaceApplyState[]> {
     const action = this.ctx.isDestroy ? 'Destroying' : 'Applying'
     logger.info(`\n🚀 ${action} Level ${levelIndex + 1}...`)
 
@@ -431,9 +431,11 @@ export class MultistageExecutor {
       results,
       entries.map((e) => e.workspace),
     )
+
+    return wsStates
   }
 
-  private async applyLevelDirectly(workspaces: Workspace[], levelIndex: number): Promise<void> {
+  private async applyLevelDirectly(workspaces: Workspace[], levelIndex: number): Promise<WorkspaceApplyState[]> {
     logger.info(`Level ${levelIndex + 1} pre-approved, applying directly...`)
 
     const entries: Array<{ workspace: Workspace; inputs: ProviderInput }> = []
@@ -456,10 +458,10 @@ export class MultistageExecutor {
 
     if (entries.length === 0) {
       logger.info('✅ No workspaces to apply in this level')
-      return
+      return []
     }
 
-    await this.applyWorkspaces(entries, levelIndex)
+    return this.applyWorkspaces(entries, levelIndex)
   }
 
   public async exec(opts: IExecOptions) {
@@ -476,8 +478,8 @@ export class MultistageExecutor {
       logger.info('=====================================')
 
       if (isLevelApproved(opts.approve, levelIndex + 1)) {
-        await this.applyLevelDirectly(level.workspaces, levelIndex)
-        logger.info(`✅ Level ${levelIndex + 1} completed`)
+        const wsStates = await this.applyLevelDirectly(level.workspaces, levelIndex)
+        logger.info(`✅ Level ${levelIndex + 1} completed${formatLevelChangeSummary(wsStates)}`)
         continue
       }
 
@@ -517,9 +519,9 @@ export class MultistageExecutor {
         if (plan.planFile) entry.planFile = plan.planFile
         return entry
       })
-      await this.applyWorkspaces(entries, levelIndex)
+      const wsStates = await this.applyWorkspaces(entries, levelIndex)
 
-      logger.info(`✅ Level ${levelIndex + 1} completed`)
+      logger.info(`✅ Level ${levelIndex + 1} completed${formatLevelChangeSummary(wsStates)}`)
     }
 
     logger.info('\n--------------------------------')
@@ -719,6 +721,14 @@ function isLevelApproved(approve: number[] | 'all' | undefined, level: number): 
   if (approve === undefined) return false
   if (approve === 'all') return true
   return approve.includes(level)
+}
+
+function formatLevelChangeSummary(wsStates: WorkspaceApplyState[]): string {
+  const add = wsStates.reduce((s, ws) => s + ws.addCount, 0)
+  const change = wsStates.reduce((s, ws) => s + ws.changeCount, 0)
+  const remove = wsStates.reduce((s, ws) => s + ws.removeCount, 0)
+  if (add === 0 && change === 0 && remove === 0) return ''
+  return `  +${add} ~${change} -${remove}`
 }
 
 export interface IExecOptions {

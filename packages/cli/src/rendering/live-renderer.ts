@@ -66,19 +66,22 @@ export const SLOW_RESOURCE_THRESHOLD_SECONDS = 60
 export function formatCompactLine(ws: WorkspaceApplyState): string {
   const icon = ws.status === 'complete' ? pc.green('ok') : ws.status === 'failed' ? pc.red('X ') : pc.cyan('* ')
   const name = ws.name.padEnd(16)
-  const progress = ws.totalCount > 0 ? `${ws.completedCount}/${ws.totalCount} resources` : ''
+  const progress = ws.totalCount > 0 ? `${ws.completedCount}/${ws.totalCount}` : ''
+  const hasChangeCounts = ws.addCount > 0 || ws.changeCount > 0 || ws.removeCount > 0
+  const changeSummary = hasChangeCounts ? pc.dim(ws.changeSummaryText) : ''
+  const progressSection = [progress, changeSummary].filter(Boolean).join('  ')
   const elapsed = `(${ws.elapsedSeconds}s)`
 
   if (ws.status === 'failed') {
     const errorDiag = ws.diagnostics.find((d) => d.severity === 'error')
     const errorMsg = errorDiag ? `  failed: ${errorDiag.summary}` : '  failed'
-    return `  ${icon} ${name} ${progress.padEnd(16)} ${pc.red(errorMsg)}  ${pc.dim(elapsed)}`
+    return `  ${icon} ${name} ${progressSection.padEnd(20)} ${pc.red(errorMsg)}  ${pc.dim(elapsed)}`
   }
 
   const current = ws.currentResource
   const currentAction = current ? `${pc.dim(current.action)} ${pc.dim(shortAddress(current.address))}` : ''
 
-  let line = `  ${icon} ${name} ${progress.padEnd(16)} ${currentAction}  ${pc.dim(elapsed)}`
+  let line = `  ${icon} ${name} ${progressSection.padEnd(20)} ${currentAction}  ${pc.dim(elapsed)}`
 
   const slowResources = getSlowResources(ws, current?.address)
   for (const res of slowResources) {

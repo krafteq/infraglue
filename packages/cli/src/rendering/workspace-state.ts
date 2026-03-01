@@ -54,6 +54,9 @@ export class WorkspaceApplyState {
   public completedCount = 0
   public failedCount = 0
   public totalCount = 0
+  public addCount = 0
+  public changeCount = 0
+  public removeCount = 0
   public readonly diagnostics: Array<{ severity: string; summary: string; address: string | null }> = []
   public readonly startTime: number
   public error: string | null = null
@@ -90,6 +93,7 @@ export class WorkspaceApplyState {
           res.elapsedSeconds = event.elapsedSeconds
         }
         this.completedCount++
+        classifyAction(event.action, this)
         break
       }
 
@@ -116,12 +120,19 @@ export class WorkspaceApplyState {
         break
 
       case 'summary':
-        // Summary gives us a total count if we haven't been tracking starts
+        // Summary is the authoritative source of change counts from the provider
+        this.addCount = event.add
+        this.changeCount = event.change
+        this.removeCount = event.remove
         if (this.totalCount === 0) {
           this.totalCount = event.add + event.change + event.remove
         }
         break
     }
+  }
+
+  get changeSummaryText(): string {
+    return `+${this.addCount} ~${this.changeCount} -${this.removeCount}`
   }
 
   markComplete(): void {
@@ -142,5 +153,20 @@ export class WorkspaceApplyState {
       if (res.status === 'in-progress') return res
     }
     return undefined
+  }
+}
+
+function classifyAction(action: string, state: WorkspaceApplyState): void {
+  const a = action.toLowerCase()
+  if (a === 'create' || a === 'creating' || a === 'created') {
+    state.addCount++
+  } else if (a === 'delete' || a === 'deleting' || a === 'deleted' || a === 'destroy') {
+    state.removeCount++
+  } else if (a === 'update' || a === 'updating' || a === 'updated') {
+    state.changeCount++
+  } else if (a === 'replace' || a === 'replacing' || a === 'replaced') {
+    // replace = one remove + one add
+    state.addCount++
+    state.removeCount++
   }
 }

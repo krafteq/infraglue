@@ -17,6 +17,9 @@ describe('WorkspaceApplyState', () => {
     expect(state.completedCount).toBe(0)
     expect(state.failedCount).toBe(0)
     expect(state.totalCount).toBe(0)
+    expect(state.addCount).toBe(0)
+    expect(state.changeCount).toBe(0)
+    expect(state.removeCount).toBe(0)
     expect(state.diagnostics).toEqual([])
     expect(state.error).toBeNull()
   })
@@ -58,7 +61,7 @@ describe('WorkspaceApplyState', () => {
     expect(res?.status).toBe('in-progress')
   })
 
-  it('handles resource_complete event', () => {
+  it('handles resource_complete event and increments action count', () => {
     state.handleEvent({
       type: 'resource_start',
       address: 'docker_network.main',
@@ -73,6 +76,7 @@ describe('WorkspaceApplyState', () => {
     })
 
     expect(state.completedCount).toBe(1)
+    expect(state.addCount).toBe(1)
     const res = state.resources.get('docker_network.main')
     expect(res?.status).toBe('complete')
     expect(res?.elapsedSeconds).toBe(12)
@@ -120,14 +124,23 @@ describe('WorkspaceApplyState', () => {
     })
 
     expect(state.totalCount).toBe(4)
+    expect(state.addCount).toBe(3)
+    expect(state.changeCount).toBe(1)
+    expect(state.removeCount).toBe(0)
   })
 
-  it('does not overwrite totalCount from summary if resources already tracked', () => {
+  it('summary event overrides resource-derived counts with authoritative counts', () => {
     state.handleEvent({
       type: 'resource_start',
       address: 'a',
       resourceType: 'x',
       action: 'create',
+    })
+    state.handleEvent({
+      type: 'resource_complete',
+      address: 'a',
+      action: 'create',
+      elapsedSeconds: 1,
     })
     state.handleEvent({
       type: 'summary',
@@ -136,6 +149,9 @@ describe('WorkspaceApplyState', () => {
       remove: 0,
     })
 
+    // Summary is authoritative for change counts
+    expect(state.addCount).toBe(5)
+    // But totalCount keeps the resource-tracked count
     expect(state.totalCount).toBe(1)
   })
 
@@ -154,6 +170,34 @@ describe('WorkspaceApplyState', () => {
     expect(state.totalCount).toBe(2)
     expect(state.completedCount).toBe(1)
     expect(state.failedCount).toBe(1)
+    expect(state.addCount).toBe(1)
+  })
+
+  it('classifies delete action as removeCount', () => {
+    state.handleEvent({ type: 'resource_start', address: 'a', resourceType: 'x', action: 'delete' })
+    state.handleEvent({ type: 'resource_complete', address: 'a', action: 'delete', elapsedSeconds: 1 })
+    expect(state.removeCount).toBe(1)
+  })
+
+  it('classifies update action as changeCount', () => {
+    state.handleEvent({ type: 'resource_start', address: 'a', resourceType: 'x', action: 'update' })
+    state.handleEvent({ type: 'resource_complete', address: 'a', action: 'update', elapsedSeconds: 1 })
+    expect(state.changeCount).toBe(1)
+  })
+
+  it('classifies replace action as add + remove', () => {
+    state.handleEvent({ type: 'resource_start', address: 'a', resourceType: 'x', action: 'replace' })
+    state.handleEvent({ type: 'resource_complete', address: 'a', action: 'replace', elapsedSeconds: 1 })
+    expect(state.addCount).toBe(1)
+    expect(state.removeCount).toBe(1)
+  })
+
+  it('returns changeSummaryText', () => {
+    state.handleEvent({ type: 'resource_start', address: 'a', resourceType: 'x', action: 'create' })
+    state.handleEvent({ type: 'resource_complete', address: 'a', action: 'create', elapsedSeconds: 1 })
+    state.handleEvent({ type: 'resource_start', address: 'b', resourceType: 'y', action: 'update' })
+    state.handleEvent({ type: 'resource_complete', address: 'b', action: 'update', elapsedSeconds: 2 })
+    expect(state.changeSummaryText).toBe('+1 ~1 -0')
   })
 
   it('markComplete sets status', () => {

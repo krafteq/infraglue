@@ -32,6 +32,10 @@ ig now loads `.ig/.env` (base) and `.ig/.env.{envName}` (per-environment) files 
 
 Pre-approved levels now skip the plan step entirely and apply directly, which is faster — especially for Pulumi where preview and up both run the program.
 
+### Apply output change counters
+
+The live view during apply/destroy now shows per-workspace change breakdowns (`+N ~N -N`) alongside progress counts, and level completion messages include aggregated totals.
+
 ### Other fixes
 
 - `--env` is now optional for `import` and `export` commands
