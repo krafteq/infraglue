@@ -1,6 +1,6 @@
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { basename, extname, join } from 'path'
+import { basename, extname, join, resolve } from 'path'
 import { readdir, readFile, copyFile, rm, access, constants, writeFile } from 'fs/promises'
 import type { IProvider, ProviderConfig } from './provider.js'
 import type { ProviderInput, ProviderOutput, OutputValue } from './provider.js'
@@ -211,8 +211,17 @@ class TerraformProvider implements IProvider {
       const backendFile = selectedEnv?.backend_file
       const backendType = selectedEnv?.backend_type
       if (backendFile) {
-        await copyFile(join(configuration.rootPath, backendFile), BACKEND_CONFIG_FILE)
+        const resolvedBackendFile = resolve(configuration.rootPath, backendFile)
+        if (!resolvedBackendFile.startsWith(configuration.rootMonoRepoFolder)) {
+          throw new UserError(`backend_file '${backendFile}' resolves outside monorepo root`)
+        }
+        await copyFile(resolvedBackendFile, BACKEND_CONFIG_FILE)
       } else if (backendType) {
+        if (!/^[a-z][a-z0-9_-]*$/.test(backendType)) {
+          throw new UserError(
+            `Invalid backend_type '${backendType}': must contain only lowercase letters, digits, hyphens, and underscores`,
+          )
+        }
         await writeFile(BACKEND_CONFIG_FILE, `terraform { \n  backend "${backendType}" {} \n}`)
       } else {
         if (
@@ -391,7 +400,12 @@ function toNonSecretInput(vars: Record<string, string>): ProviderInput {
 }
 
 function parseTerraformOutputJson(stdout: string): ProviderOutput {
-  const outputs = JSON.parse(stdout) as Record<string, { value: unknown; sensitive?: boolean }>
+  let outputs: Record<string, { value: unknown; sensitive?: boolean }>
+  try {
+    outputs = JSON.parse(stdout) as Record<string, { value: unknown; sensitive?: boolean }>
+  } catch {
+    throw new ProviderError('Failed to parse Terraform output JSON', 'terraform', '')
+  }
   return Object.fromEntries(
     Object.entries(outputs).map(([key, output]) => [
       key,
@@ -418,7 +432,15 @@ export function parseTerraformPlanOutput(terraformOutput: string, projectName: s
   }
 
   const jsonLines = terraformOutput.trim().split('\n')
-  const jsonObjects = jsonLines.map((line) => JSON.parse(line))
+  const jsonObjects = jsonLines
+    .map((line) => {
+      try {
+        return JSON.parse(line)
+      } catch {
+        return null
+      }
+    })
+    .filter((obj) => obj !== null)
 
   for (const obj of jsonObjects) {
     if (obj.type === 'planned_change') {
@@ -495,7 +517,17 @@ export function parseTerraformPlanOutput(terraformOutput: string, projectName: s
 }
 
 export function enrichPlanWithShowOutput(plan: ProviderPlan, showOutput: string): ProviderPlan {
-  const showData = JSON.parse(showOutput)
+  let showData: {
+    resource_changes?: Array<{
+      address: string
+      change?: { before?: Record<string, unknown> | null; after?: Record<string, unknown> | null }
+    }>
+  }
+  try {
+    showData = JSON.parse(showOutput) as typeof showData
+  } catch {
+    return plan
+  }
   const detailsByAddress = new Map<
     string,
     { before: Record<string, unknown> | null; after: Record<string, unknown> | null }

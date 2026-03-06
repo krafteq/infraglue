@@ -54,7 +54,7 @@ export class StateManager {
     await this.ensureInitialized()
     await mkdir(folderPath, { recursive: true })
     const filePath = join(folderPath, fileName)
-    await writeFile(filePath, content, STATE_FILE_ENCODING)
+    await writeFile(filePath, content, { encoding: STATE_FILE_ENCODING, mode: 0o600 })
     return relative(workspacePath, filePath)
   }
 
@@ -74,7 +74,7 @@ export class StateManager {
     const content = JSON.stringify(state, null, 2)
 
     await this.ensureInitialized()
-    await writeFile(this.stateFilePath, content, STATE_FILE_ENCODING)
+    await writeFile(this.stateFilePath, content, { encoding: STATE_FILE_ENCODING, mode: 0o600 })
   }
 
   private async ensureInitialized(): Promise<void> {

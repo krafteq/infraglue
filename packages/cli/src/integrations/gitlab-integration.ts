@@ -33,14 +33,12 @@ export class GitLabClient {
       })
 
       if (!response.ok) {
-        const errorText = await response.text()
-        console.error(`Failed to add comment to merge request: ${response.status} ${response.statusText}`)
-        console.error(`Response body: ${errorText}`)
-        console.error(`Merge request URL: ${this.mergeRequestUrl}`)
+        logger.error(`Failed to add comment to merge request: ${response.status} ${response.statusText}`)
+        logger.debug(`Merge request URL: ${this.mergeRequestUrl}`)
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
     } catch (error) {
-      console.error('Error adding comment to merge request:', error)
+      logger.error(`Error adding comment to merge request: ${error instanceof Error ? error.message : String(error)}`)
       throw error
     }
   }

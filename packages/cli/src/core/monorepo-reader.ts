@@ -87,7 +87,12 @@ async function readWorkspaces(
       const globPattern = pattern.endsWith('/') ? pattern : `${pattern}/`
       const paths: string[] = []
       for await (const entry of glob(globPattern, { cwd: rootPath })) {
-        paths.push(resolve(rootPath, entry))
+        const resolved = resolve(rootPath, entry)
+        if (!resolved.startsWith(rootPath)) {
+          logger.warn(`Workspace path ${entry} resolves outside monorepo root. Skipping.`)
+          continue
+        }
+        paths.push(resolved)
       }
       return paths
     }),
@@ -127,18 +132,30 @@ async function getWorkspace(
     throw new UserError(`Unknown provider '${provider}' in ${path}. Supported: terraform, pulumi.`)
   }
 
+  const injectionEntries = Object.entries(config?.injection || {}).map(([key, value]) => {
+    const [workspace, injectionKey] = value.split(':')
+    const resolvedPath = resolve(path, workspace)
+    if (!resolvedPath.startsWith(rootPath)) {
+      throw new ConfigError(`Injection '${key}' references path outside monorepo root: ${workspace}`, path)
+    }
+    return [key, { workspace: resolvedPath, key: injectionKey }] as const
+  })
+
+  const resolvedDeps = (config?.depends_on || []).map((dependency) => {
+    const resolvedPath = resolve(path, dependency)
+    if (!resolvedPath.startsWith(rootPath)) {
+      throw new ConfigError(`depends_on references path outside monorepo root: ${dependency}`, path)
+    }
+    return resolvedPath
+  })
+
   return new Workspace(
     config?.alias ?? relative(rootPath, path),
     path,
     rootPath,
     providerInstance,
-    Object.fromEntries(
-      Object.entries(config?.injection || {}).map(([key, value]) => {
-        const [workspace, injectionKey] = value.split(':')
-        return [key, { workspace: join(path, workspace), key: injectionKey }]
-      }),
-    ),
-    (config?.depends_on || []).map((dependency) => join(path, dependency)),
+    Object.fromEntries(injectionEntries),
+    resolvedDeps,
     interpolateEnvConfigs(config?.envs ?? {}, path),
     rootVars,
   )
