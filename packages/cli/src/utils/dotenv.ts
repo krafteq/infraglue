@@ -1,6 +1,9 @@
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { logger } from './logger.js'
+import { UserError } from './errors.js'
+
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
 /**
  * Parse dotenv file content into key-value pairs.
@@ -8,7 +11,7 @@ import { logger } from './logger.js'
  * blank lines, and `export KEY=VALUE` prefix.
  */
 export function parseDotEnv(content: string): Record<string, string> {
-  const result: Record<string, string> = {}
+  const result: Record<string, string> = Object.create(null) as Record<string, string>
 
   for (const line of content.split('\n')) {
     const trimmed = line.trim()
@@ -21,6 +24,8 @@ export function parseDotEnv(content: string): Record<string, string> {
     if (eqIndex === -1) continue
 
     const key = assignment.slice(0, eqIndex).trim()
+    if (UNSAFE_KEYS.has(key)) continue
+
     let value = assignment.slice(eqIndex + 1)
 
     // Handle quoted values
@@ -42,6 +47,9 @@ export function parseDotEnv(content: string): Record<string, string> {
 export async function loadDotEnvFiles(rootPath: string, envName?: string): Promise<void> {
   await loadSingleDotEnv(join(rootPath, '.ig', '.env'))
   if (envName) {
+    if (envName.includes('/') || envName.includes('\\') || envName.includes('..')) {
+      throw new UserError(`Invalid environment name '${envName}': must not contain path separators`)
+    }
     await loadSingleDotEnv(join(rootPath, '.ig', `.env.${envName}`))
   }
 }

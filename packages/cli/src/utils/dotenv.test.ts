@@ -1,4 +1,5 @@
 import { parseDotEnv, loadDotEnvFiles } from './dotenv.js'
+import { UserError } from './errors.js'
 import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -46,6 +47,18 @@ describe('parseDotEnv', () => {
 
   it('should skip lines without =', () => {
     expect(parseDotEnv('INVALID_LINE\nFOO=bar')).toEqual({ FOO: 'bar' })
+  })
+
+  it('should skip __proto__ key', () => {
+    const result = parseDotEnv('__proto__=malicious\nFOO=bar')
+    expect(result['FOO']).toBe('bar')
+    expect('__proto__' in result).toBe(false)
+  })
+
+  it('should skip constructor key', () => {
+    const result = parseDotEnv('constructor=malicious\nFOO=bar')
+    expect(result['FOO']).toBe('bar')
+    expect('constructor' in result).toBe(false)
   })
 
   it('should handle mixed formats', () => {
@@ -131,6 +144,16 @@ describe('loadDotEnvFiles', () => {
     // No .env.staging file — should not throw
     await expect(loadDotEnvFiles(tmpDir, 'staging')).resolves.toBeUndefined()
     expect(process.env['DOTENV_TEST_BASE']).toBe('value')
+  })
+
+  it('should reject envName with path separators', async () => {
+    await expect(loadDotEnvFiles(tmpDir, '../etc/passwd')).rejects.toThrow(UserError)
+    await expect(loadDotEnvFiles(tmpDir, 'foo/bar')).rejects.toThrow(UserError)
+    await expect(loadDotEnvFiles(tmpDir, 'foo\\bar')).rejects.toThrow(UserError)
+  })
+
+  it('should reject envName with ..', async () => {
+    await expect(loadDotEnvFiles(tmpDir, '..')).rejects.toThrow(UserError)
   })
 
   it('should silently ignore missing .ig directory', async () => {
