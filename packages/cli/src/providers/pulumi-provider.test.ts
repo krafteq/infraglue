@@ -33,6 +33,16 @@ function makeConfig(overrides?: Partial<ProviderConfig>): ProviderConfig {
   }
 }
 
+function getSetAllArgs(): string[][] {
+  return vi
+    .mocked(execFile)
+    .mock.calls.filter((c) => {
+      const args = c[1] as string[]
+      return args[0] === 'config' && args[1] === 'set-all'
+    })
+    .map((c) => c[1] as string[])
+}
+
 describe('PulumiProvider.setPulumiConfig (via getPlan)', () => {
   beforeEach(() => {
     vi.mocked(execFile).mockReset()
@@ -58,6 +68,33 @@ describe('PulumiProvider.setPulumiConfig (via getPlan)', () => {
     }) as never)
   })
 
+  it('should use a single set-all call instead of one process per key', async () => {
+    const input: ProviderInput = {
+      key1: { value: 'val1', secret: false },
+      key2: { value: 'val2', secret: false },
+      key3: { value: 'val3', secret: true },
+    }
+
+    try {
+      await pulumiProvider.getPlan(makeConfig(), input, 'dev')
+    } catch {
+      // ignore parse error
+    }
+
+    const setAllCalls = getSetAllArgs()
+    expect(setAllCalls).toHaveLength(1)
+    expect(setAllCalls[0]).toEqual([
+      'config',
+      'set-all',
+      '--plaintext',
+      'key1=val1',
+      '--plaintext',
+      'key2=val2',
+      '--secret',
+      'key3=val3',
+    ])
+  })
+
   it('should pass values with shell-special characters safely via execFile', async () => {
     const input: ProviderInput = {
       db_password: { value: 'p@ss^w&rd$100!', secret: true },
@@ -66,18 +103,18 @@ describe('PulumiProvider.setPulumiConfig (via getPlan)', () => {
     try {
       await pulumiProvider.getPlan(makeConfig(), input, 'dev')
     } catch {
-      // getPlan will fail on parsing empty JSON, that's fine — we only care about the execFile call
+      // ignore parse error
     }
 
     expect(execFile).toHaveBeenCalledWith(
       'pulumi',
-      ['config', 'set', '--secret', 'db_password', '--', 'p@ss^w&rd$100!'],
+      ['config', 'set-all', '--secret', 'db_password=p@ss^w&rd$100!'],
       expect.any(Object),
       expect.any(Function),
     )
   })
 
-  it('should pass non-secret values without --secret flag', async () => {
+  it('should mark non-secret values with --plaintext', async () => {
     const input: ProviderInput = {
       app_name: { value: 'my-app', secret: false },
     }
@@ -90,7 +127,7 @@ describe('PulumiProvider.setPulumiConfig (via getPlan)', () => {
 
     expect(execFile).toHaveBeenCalledWith(
       'pulumi',
-      ['config', 'set', 'app_name', '--', 'my-app'],
+      ['config', 'set-all', '--plaintext', 'app_name=my-app'],
       expect.any(Object),
       expect.any(Function),
     )
@@ -109,10 +146,21 @@ describe('PulumiProvider.setPulumiConfig (via getPlan)', () => {
 
     expect(execFile).toHaveBeenCalledWith(
       'pulumi',
-      ['config', 'set', 'connection_string', '--', 'host=db user="admin" pass=`secret`'],
+      ['config', 'set-all', '--plaintext', 'connection_string=host=db user="admin" pass=`secret`'],
       expect.any(Object),
       expect.any(Function),
     )
+  })
+
+  it('should skip execFile call when there are no vars to set', async () => {
+    try {
+      await pulumiProvider.getPlan(makeConfig(), {}, 'dev')
+    } catch {
+      // ignore parse error
+    }
+
+    const setAllCalls = getSetAllArgs()
+    expect(setAllCalls).toHaveLength(0)
   })
 
   it('should merge rootVars, envVars, and input (input wins)', async () => {
@@ -130,15 +178,17 @@ describe('PulumiProvider.setPulumiConfig (via getPlan)', () => {
       // ignore parse error
     }
 
-    const calls = vi.mocked(execFile).mock.calls
-    const setArgs = calls.map((c) => c[1] as string[])
+    const setAllCalls = getSetAllArgs()
+    expect(setAllCalls).toHaveLength(1)
 
+    const args = setAllCalls[0]
     // 'shared' should be set to 'input-val' (input overrides rootVars and envVars)
-    const sharedCall = setArgs.find((args) => args.includes('shared'))
-    expect(sharedCall).toEqual(['config', 'set', 'shared', '--', 'input-val'])
-
-    // 'env_only' should still be set
-    const envOnlyCall = setArgs.find((args) => args.includes('env_only'))
-    expect(envOnlyCall).toEqual(['config', 'set', 'env_only', '--', 'e'])
+    expect(args).toContain('--plaintext')
+    expect(args).toContain('shared=input-val')
+    // 'env_only' should still be present
+    expect(args).toContain('env_only=e')
+    // 'shared=root-val' and 'shared=env-val' should NOT appear
+    expect(args).not.toContain('shared=root-val')
+    expect(args).not.toContain('shared=env-val')
   })
 })

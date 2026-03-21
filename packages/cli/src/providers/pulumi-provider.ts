@@ -195,12 +195,16 @@ class PulumiProvider implements IProvider {
       ...toNonSecretInput(envVars),
       ...input,
     }
-    for (const [key, outputValue] of Object.entries(allVars)) {
-      const args = ['config', 'set']
-      if (outputValue.secret) args.push('--secret')
-      args.push(key, '--', outputValue.value)
-      await this.execFileCommand('pulumi', args, configuration, env)
+    const entries = Object.entries(allVars)
+    if (entries.length === 0) return
+
+    // Use `pulumi config set-all` to set all values in a single process invocation
+    // instead of spawning a separate process per key.
+    const args = ['config', 'set-all']
+    for (const [key, outputValue] of entries) {
+      args.push(outputValue.secret ? '--secret' : '--plaintext', `${key}=${outputValue.value}`)
     }
+    await this.execFileCommand('pulumi', args, configuration, env)
   }
 
   private getDefaultExecOptions(configuration: ProviderConfig, env: string): ExecOptions {
