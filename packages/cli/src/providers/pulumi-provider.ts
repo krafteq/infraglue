@@ -1,4 +1,4 @@
-import { exec, spawn } from 'child_process'
+import { exec, execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { basename, join, resolve } from 'path'
 import { homedir } from 'os'
@@ -15,6 +15,7 @@ import { spawnWithLineStream } from './spawn-command.js'
 import { parsePulumiStreamLine } from './stream-parser.js'
 
 const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 const spawnAsync = promisify(spawn)
 const accessAsync = promisify(access)
 
@@ -195,8 +196,10 @@ class PulumiProvider implements IProvider {
       ...input,
     }
     for (const [key, outputValue] of Object.entries(allVars)) {
-      const secretFlag = outputValue.secret ? ' --secret' : ''
-      await this.execCommand(`pulumi config set${secretFlag} ${key} -- ${outputValue.value}`, configuration, env)
+      const args = ['config', 'set']
+      if (outputValue.secret) args.push('--secret')
+      args.push(key, '--', outputValue.value)
+      await this.execFileCommand('pulumi', args, configuration, env)
     }
   }
 
@@ -302,6 +305,34 @@ class PulumiProvider implements IProvider {
     }
 
     return result.stdout
+  }
+
+  private async execFileCommand(
+    cmd: string,
+    args: string[],
+    configuration: ProviderConfig,
+    env: string,
+  ): Promise<string> {
+    try {
+      logger.debug(`[pulumi] execFile: ${cmd} ${args.join(' ')}\n  cwd: ${configuration.rootPath}`)
+      const { stdout, stderr } = await execFileAsync(cmd, args, this.getDefaultExecOptions(configuration, env))
+      if (stderr && stderr.trim()) {
+        logger.debug(`[pulumi] stderr:\n${stderr}`)
+      }
+      return stdout
+    } catch (error) {
+      if (error instanceof Error) {
+        const err = error as Error & { code?: number; stderr?: string; stdout?: string }
+        const command = `${cmd} ${args.join(' ')}`
+        logger.debug(
+          `[pulumi] execFile failed: ${command}\n  cwd: ${configuration.rootPath}\n  code: ${err.code}\n  stderr:\n${err.stderr}\n  stdout (raw):\n${err.stdout}`,
+        )
+        const diagnostics = extractPulumiDiagnostics(err.stdout ?? '', err.stderr ?? '')
+        const message = formatProviderErrorMessage('Pulumi', configuration.alias, diagnostics, command)
+        throw new ProviderError(message, 'pulumi', configuration.alias, { diagnostics, command })
+      }
+      throw error
+    }
   }
 
   private async execCommand(command: string, configuration: ProviderConfig, env: string): Promise<string> {
