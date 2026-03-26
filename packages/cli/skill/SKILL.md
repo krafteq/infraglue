@@ -251,6 +251,10 @@ ig apply --env dev --no-deps          # apply without running dependencies
 ig apply --env dev --start-with-project postgres  # skip upstream levels, use cached outputs
 ig destroy --env staging              # destroy all workspaces
 
+# GitLab CI (bridge-less mode)
+ig ci --env staging                   # full lifecycle: read approvals, apply, plan, post comments
+ig ci --env prod --approval-emoji rocket  # use custom emoji for approval
+
 # Drift detection and reconciliation
 ig drift --env staging                # detect drift across all workspaces (exit code 2 = drift)
 ig drift --env prod --json            # output structured DriftReport as JSON
@@ -296,6 +300,27 @@ ig install-skill --force              # overwrite existing
 
 Level numbers are 1-indexed. Without `--approve`, the command waits for interactive confirmation. Pre-approved levels skip the plan step entirely and apply directly (no `terraform plan`/`pulumi preview`), which is faster — especially for Pulumi where preview and up both run the program.
 
+**`--up-to-level <N>`** (for `ig apply` and `ig destroy`):
+
+Stop execution after level N (1-indexed). Combine with `--approve all` to auto-apply up to a specific level:
+
+```bash
+ig apply --env prod --approve all --up-to-level 2   # apply levels 1 and 2, skip the rest
+```
+
+This is used by the GitLab bridge to apply only the approved level.
+
+**Environment variables for bridge-triggered pipelines:**
+
+When the InfraGlue Bridge triggers a pipeline, it sets `IG_ACTION=apply` and `IG_APPROVED_LEVEL=N`. The CLI auto-detects these and defaults to `--approve all --up-to-level N` (explicit CLI flags take precedence).
+
+| Variable            | Description                                 |
+| ------------------- | ------------------------------------------- |
+| `IG_ACTION`         | Set to `apply` by the bridge                |
+| `IG_APPROVED_LEVEL` | Level number approved via MR emoji reaction |
+| `IG_PLAN_ID`        | Plan ID for correlation                     |
+| `IG_MR_IID`         | Merge request IID for correlation           |
+
 **`--start-with-project <name>`** (for `ig apply`, `ig destroy`, `ig plan`):
 
 Skip all execution levels before the level containing the named project. Cached outputs from `.ig/state.json` are used for skipped workspaces instead of running provider commands. Useful for resuming partially-applied monorepos or iterating on a downstream workspace without re-running upstream.
@@ -335,6 +360,41 @@ During `ig apply` and `ig destroy`, ig streams real-time progress from Terraform
 [redis] create docker_network.main (12s)
 [postgres] error: aws_rds.main - DBInstanceAlreadyExists
 ```
+
+### GitLab MR Approval Workflow
+
+Two modes are available for GitLab MR-based approval:
+
+**Bridge-less mode (`ig ci`)** — single pipeline job, no external service:
+
+```yaml
+# .gitlab-ci.yml
+infraglue:
+  script: ig ci --env $CI_ENVIRONMENT_NAME
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+```
+
+On each pipeline run, `ig ci` reads MR comments + emoji reactions and determines what to do:
+
+1. **No comments** — plans forward, posts one comment per level that has changes
+2. **Comments exist, none approved** — exits (waiting for approvals)
+3. **Some levels approved (thumbsup)** — applies approved levels, plans remaining, posts new comments
+4. **Code changed since last plan** — marks old comments as stale, re-plans from scratch
+
+After approving a level (thumbsup on the comment), manually re-trigger the pipeline (`/run_pipeline` or "Run pipeline" button in MR). Levels with no changes are auto-skipped.
+
+**Bridge mode (`ig plan` + `@krafteq/infraglue-bridge`)** — webhook-driven, instant reaction:
+
+```text
+MR push → ig plan → posts comment per level
+User 👍 comment → bridge webhook → triggers pipeline
+ig apply (auto: --approve all --up-to-level N) → applies → re-plans → posts new comments
+```
+
+`ig plan` auto-detects GitLab MR pipelines and posts comments. The bridge service receives emoji webhooks and instantly triggers apply pipelines via the GitLab trigger API.
+
+Both modes use the same comment format with hidden `<!-- ig-meta:{...} -->` tags.
 
 ### Global Options
 

@@ -890,6 +890,77 @@ describe('MultistageExecutor', () => {
     })
   })
 
+  describe('onLevelPlanned callback', () => {
+    it('should call onLevelPlanned for each level with changes', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      const onLevelPlanned = vi.fn().mockResolvedValue(undefined)
+
+      await executor.plan({ formatter: createFormatter(), onLevelPlanned })
+
+      expect(onLevelPlanned).toHaveBeenCalledTimes(2)
+      expect(onLevelPlanned).toHaveBeenCalledWith(expect.objectContaining({ levelIndex: 0, levelsCount: 2 }))
+      expect(onLevelPlanned).toHaveBeenCalledWith(expect.objectContaining({ levelIndex: 1, levelsCount: 2 }))
+      // Verify levelPlans contain workspace data
+      const firstCall = onLevelPlanned.mock.calls[0][0]
+      expect(firstCall.levelPlans).toHaveLength(1)
+      expect(firstCall.levelPlans[0].workspace.name).toBe('ws1')
+    })
+
+    it('should not call onLevelPlanned for levels with no changes', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      let planCallCount = 0
+      mockGetPlan.mockImplementation(async () => {
+        planCallCount++
+        if (planCallCount === 1) return createProviderPlan() // ws1: no changes
+        return createProviderPlan({
+          changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+        })
+      })
+      mockGetOutputs.mockResolvedValue({ outputs: { key: { value: 'val', secret: false } }, actual: true })
+
+      const onLevelPlanned = vi.fn().mockResolvedValue(undefined)
+
+      await executor.plan({ formatter: createFormatter(), onLevelPlanned })
+
+      expect(onLevelPlanned).toHaveBeenCalledTimes(1)
+      expect(onLevelPlanned).toHaveBeenCalledWith(expect.objectContaining({ levelIndex: 1 }))
+    })
+
+    it('should propagate callback errors', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+
+      const onLevelPlanned = vi.fn().mockRejectedValue(new Error('Failed to post comment'))
+
+      await expect(executor.plan({ formatter: createFormatter(), onLevelPlanned })).rejects.toThrow(
+        'Failed to post comment',
+      )
+    })
+  })
+
   describe('--approve flag', () => {
     it('should skip plan and apply directly when --approve matches level (non-interactive)', async () => {
       envSelected()
@@ -1077,6 +1148,93 @@ describe('MultistageExecutor', () => {
 
       // Both workspaces attempted apply
       expect(mockApply).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('--up-to-level', () => {
+    it('should stop execution after the specified level', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const ws3 = createWs('ws3', ['ws2'])
+      const monorepo = new Monorepo('/root', [ws1, ws2, ws3], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockApply.mockResolvedValue({ key: { value: 'val', secret: false } })
+
+      await executor.exec({
+        formatter: createFormatter(),
+        integration: createInteractiveIntegration(),
+        approve: 'all',
+        upToLevel: 2,
+      })
+
+      // Only ws1 (level 1) and ws2 (level 2) should be applied, not ws3 (level 3)
+      expect(mockApply).toHaveBeenCalledTimes(2)
+    })
+
+    it('should run only first level when upToLevel is 1', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockApply.mockResolvedValue({ key: { value: 'val', secret: false } })
+
+      await executor.exec({
+        formatter: createFormatter(),
+        integration: createInteractiveIntegration(),
+        approve: 'all',
+        upToLevel: 1,
+      })
+
+      expect(mockApply).toHaveBeenCalledTimes(1)
+    })
+
+    it('should run all levels when upToLevel exceeds total levels', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2', ['ws1'])
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockApply.mockResolvedValue({ key: { value: 'val', secret: false } })
+
+      await executor.exec({
+        formatter: createFormatter(),
+        integration: createInteractiveIntegration(),
+        approve: 'all',
+        upToLevel: 10,
+      })
+
+      expect(mockApply).toHaveBeenCalledTimes(2)
+    })
+
+    it('should still prompt for confirmation when upToLevel is set without --approve', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(
+        createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } }),
+      )
+      mockApply.mockResolvedValue({ key: { value: 'val', secret: false } })
+
+      const integration = createInteractiveIntegration()
+      await executor.exec({
+        formatter: createFormatter(),
+        integration,
+        upToLevel: 1,
+      })
+
+      expect(integration.askForConfirmation).toHaveBeenCalled()
+      expect(mockApply).toHaveBeenCalledTimes(1)
     })
   })
 

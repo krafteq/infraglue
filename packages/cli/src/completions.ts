@@ -5,7 +5,7 @@ _ig_completions() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  commands="apply destroy plan drift refresh import export config env provider completion install-skill"
+  commands="apply destroy plan ci drift refresh import export config env provider completion install-skill"
 
   case "\${prev}" in
     ig)
@@ -27,7 +27,7 @@ _ig_completions() {
   esac
 
   if [[ "\${cur}" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--env --format --integration --approve --verbose --quiet --strict --directory --help --json --project --no-deps --detailed --refresh-only --start-with-project" -- "\${cur}") )
+    COMPREPLY=( $(compgen -W "--env --format --integration --approve --up-to-level --verbose --quiet --strict --directory --help --json --project --no-deps --detailed --refresh-only --start-with-project" -- "\${cur}") )
   fi
 }
 complete -F _ig_completions ig
@@ -52,6 +52,7 @@ _ig() {
     'env:Manage environments'
     'provider:Run provider CLI commands'
     'completion:Output shell completion script'
+    'ci:Run plan/apply lifecycle in GitLab MR pipeline'
     'install-skill:Install AI coding agent skill'
   )
 
@@ -75,6 +76,7 @@ _ig() {
             '(-f --format)'{-f,--format}'[Output format]:format:(default)' \\
             '(-i --integration)'{-i,--integration}'[Integration mode]:mode:(cli no-tty-cli)' \\
             '(-a --approve)'{-a,--approve}'[Auto-approve level]:level:' \\
+            '(-u --up-to-level)'{-u,--up-to-level}'[Stop after level N]:level:' \\
             '(-p --project)'{-p,--project}'[Project name]:project:' \\
             '--no-deps[Ignore dependencies]' \\
             '--start-with-project[Skip levels before project]:project:'
@@ -152,6 +154,7 @@ complete -c ig -n '__fish_use_subcommand' -a refresh -d 'Refresh infrastructure 
 complete -c ig -n '__fish_use_subcommand' -a import -d 'Import cloud resource into state'
 complete -c ig -n '__fish_use_subcommand' -a export -d 'Generate code for cloud resources'
 complete -c ig -n '__fish_use_subcommand' -a completion -d 'Output shell completion script'
+complete -c ig -n '__fish_use_subcommand' -a ci -d 'Run plan/apply lifecycle in GitLab MR pipeline'
 complete -c ig -n '__fish_use_subcommand' -a install-skill -d 'Install AI coding agent skill'
 
 # apply/destroy options
@@ -162,6 +165,7 @@ complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s a -l approve -d
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s p -l project -d 'Project name' -r
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -l no-deps -d 'Ignore dependencies'
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -l start-with-project -d 'Skip levels before project' -r
+complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s u -l up-to-level -d 'Stop after level N' -r
 
 # plan options
 complete -c ig -n '__fish_seen_subcommand_from plan' -s e -l env -d 'Environment name' -r

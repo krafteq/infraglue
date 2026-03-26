@@ -1,6 +1,6 @@
+import { DefaultFormatter } from '../formatters/default-formatter.js'
+import type { ProviderPlan } from '../providers/provider-plan.js'
 import { logger } from '../utils/logger.js'
-
-// TODO: refactor this. and implement IIntegration
 
 /**
  * GitLab API client for interacting with GitLab merge requests
@@ -18,28 +18,82 @@ export class GitLabClient {
     }
   }
 
+  private get headers(): Record<string, string> {
+    return {
+      'PRIVATE-TOKEN': GitLabPipeline.getAccessToken() || '',
+      'Content-Type': 'application/json',
+    }
+  }
+
   /**
    * Add a comment to a merge request
    */
   async addComment(content: string) {
-    try {
-      const response = await fetch(`${this.mergeRequestUrl}/notes`, {
-        method: 'POST',
-        body: JSON.stringify({ body: content }),
-        headers: {
-          'PRIVATE-TOKEN': GitLabPipeline.getAccessToken() || '',
-          'Content-Type': 'application/json',
-        },
-      })
+    const response = await fetch(`${this.mergeRequestUrl}/notes`, {
+      method: 'POST',
+      body: JSON.stringify({ body: content }),
+      headers: this.headers,
+    })
+
+    if (!response.ok) {
+      logger.error(`Failed to add comment to merge request: ${response.status} ${response.statusText}`)
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+  }
+
+  /**
+   * List all notes on the merge request (sorted ascending by creation).
+   */
+  async listNotes(): Promise<GitLabNote[]> {
+    const allNotes: GitLabNote[] = []
+    let page = 1
+
+    while (true) {
+      const url = `${this.mergeRequestUrl}/notes?sort=asc&per_page=100&page=${page}`
+      const response = await fetch(url, { headers: this.headers })
 
       if (!response.ok) {
-        logger.error(`Failed to add comment to merge request: ${response.status} ${response.statusText}`)
-        logger.debug(`Merge request URL: ${this.mergeRequestUrl}`)
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        throw new Error(`Failed to list MR notes: HTTP ${response.status}`)
       }
-    } catch (error) {
-      logger.error(`Error adding comment to merge request: ${error instanceof Error ? error.message : String(error)}`)
-      throw error
+
+      const notes = (await response.json()) as GitLabNote[]
+      allNotes.push(...notes.filter((n) => !n.system))
+
+      const nextPage = response.headers.get('x-next-page')
+      if (!nextPage) break
+      page = parseInt(nextPage, 10)
+    }
+
+    return allNotes
+  }
+
+  /**
+   * List award emojis on a specific MR note.
+   */
+  async listNoteAwardEmojis(noteId: number): Promise<GitLabAwardEmoji[]> {
+    const url = `${this.mergeRequestUrl}/notes/${noteId}/award_emoji`
+    const response = await fetch(url, { headers: this.headers })
+
+    if (!response.ok) {
+      throw new Error(`Failed to list note emojis: HTTP ${response.status}`)
+    }
+
+    return (await response.json()) as GitLabAwardEmoji[]
+  }
+
+  /**
+   * Edit a merge request note body.
+   */
+  async editNote(noteId: number, newBody: string) {
+    const url = `${this.mergeRequestUrl}/notes/${noteId}`
+    const response = await fetch(url, {
+      method: 'PUT',
+      body: JSON.stringify({ body: newBody }),
+      headers: this.headers,
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to edit note ${noteId}: HTTP ${response.status}`)
     }
   }
 }
@@ -117,7 +171,61 @@ export class GitLabPipeline {
     return `${apiUrl}/projects/${projectId}/merge_requests/${mergeRequestIid}`
   }
 
+  static getCommitSha(): string | null {
+    return process.env['CI_COMMIT_SHA'] || null
+  }
+
   static getAccessToken(): string | null {
     return process.env['GITLAB_ACCESS_TOKEN'] || process.env['CI_JOB_TOKEN'] || null
   }
+}
+
+export interface GitLabNote {
+  id: number
+  body: string
+  system: boolean
+  updated_at: string
+}
+
+export interface GitLabAwardEmoji {
+  id: number
+  name: string
+  user: { username: string }
+}
+
+export interface LevelCommentData {
+  levelNumber: number
+  levelsCount: number
+  workspacePlans: Array<{ workspaceName: string; plan: ProviderPlan }>
+  planId: string
+  commitSha?: string | undefined
+}
+
+/**
+ * Format an MR comment for a single execution level.
+ * Includes formatted plan per workspace, approval hint, and ig-meta tag.
+ */
+export function formatLevelComment(data: LevelCommentData): string {
+  const header = `## InfraGlue Plan — Level ${data.levelNumber}/${data.levelsCount}\n\n`
+
+  const body = data.workspacePlans
+    .map(({ workspaceName, plan }) => {
+      const formatted = DefaultFormatter.formatForMarkdown(plan)
+      return formatted ? `### ${workspaceName}\n${formatted}` : ''
+    })
+    .filter(Boolean)
+    .join('\n\n')
+
+  const workspaceNames = data.workspacePlans.map((wp) => wp.workspaceName)
+  const metaObj: Record<string, unknown> = {
+    level: data.levelNumber,
+    workspaces: workspaceNames,
+    planId: data.planId,
+  }
+  if (data.commitSha) metaObj['commitSha'] = data.commitSha
+  const metadata = `<!-- ig-meta:${JSON.stringify(metaObj)} -->`
+
+  const approvalHint = '\n\n> React with :thumbsup: to approve this level.\n'
+
+  return `${header}${body}${approvalHint}\n${metadata}`
 }
