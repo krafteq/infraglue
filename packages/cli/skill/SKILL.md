@@ -65,11 +65,12 @@ output: # optional: expose workspace outputs at monorepo level
 
 ### Fields
 
-| Field       | Type                     | Required | Description                                                                                        |
-| ----------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------- |
-| `workspace` | `string[]`               | Yes      | Glob patterns to discover workspace directories (must match at least one)                          |
-| `vars`      | `Record<string, string>` | No       | Shared variables passed to all workspaces (lowest priority, overridden by env vars and injections) |
-| `output`    | `Record<string, string>` | No       | Map of exported names to `'./workspace:output_key'` references                                     |
+| Field       | Type                     | Required | Description                                                                                         |
+| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------- |
+| `workspace` | `string[]`               | Yes      | Glob patterns to discover workspace directories (must match at least one)                           |
+| `vars`      | `Record<string, string>` | No       | Shared variables passed to all workspaces (lowest priority, overridden by env vars and injections)  |
+| `output`    | `Record<string, string>` | No       | Map of exported names to `'./workspace:output_key'` references                                      |
+| `vault`     | `VaultConfig`            | No       | HashiCorp Vault connection settings (see [Vault Secret Interpolation](#vault-secret-interpolation)) |
 
 ## Workspace-Level ig.yaml
 
@@ -175,6 +176,52 @@ envs:
 - `$${VAR}` escapes to the literal string `${VAR}` (no interpolation)
 - A missing (unset) environment variable throws an error; empty string is valid
 - Structural fields (`workspace`, `injection`, `depends_on`, `alias`, `provider`, `output`) are NOT interpolated
+
+### Vault Secret Interpolation
+
+String values in `vars`, `backend_config`, `backend_type`, `backend_file`, and `var_files` support `${vault:path#field}` syntax, which fetches secrets from HashiCorp Vault's KV v2 engine at config parse time.
+
+```yaml
+# root ig.yaml
+vault:
+  address: https://vault.example.com # optional, falls back to VAULT_ADDR env var
+  role: infra-role # optional, for JWT auth — falls back to VAULT_ROLE env var
+
+workspace:
+  - './*'
+
+# workspace ig.yaml
+envs:
+  prod:
+    backend_type: azurerm
+    backend_config:
+      storage_account_name: ${vault:secret/data/azure#storage_account}
+      access_key: ${vault:secret/data/azure#access_key}
+    vars:
+      db_password: ${vault:secret/data/db/prod#password}
+      PULUMI_CONFIG_PASSPHRASE: ${vault:secret/data/pulumi#passphrase}
+```
+
+- `${vault:path#field}` fetches field `field` from the KV v2 secret at `path`
+- The path must include the KV v2 `secret/data/` prefix (e.g., `secret/data/myapp`)
+- Multiple references to the same path fetch the secret once (cached per run)
+- `$${vault:path#field}` escapes to the literal string `${vault:path#field}` (no resolution)
+- Vault references and `${ENV_VAR}` references can be mixed in the same config
+
+**Authentication** — ig resolves a Vault token using this priority:
+
+1. `VAULT_TOKEN` env var (set explicitly or by `vault login`)
+2. `~/.vault-token` file (written by `vault login`)
+3. JWT auth — if `VAULT_ID_TOKEN` is set, exchanges it for a token via `POST /v1/auth/{mount}/login`
+
+For local development, run `vault login` once. In CI (e.g., GitLab), the pipeline provides `VAULT_ID_TOKEN` automatically.
+
+**Vault config fields:**
+
+| Field     | Type     | Description                                           |
+| --------- | -------- | ----------------------------------------------------- |
+| `address` | `string` | Vault server URL. Falls back to `VAULT_ADDR` env var  |
+| `role`    | `string` | Role for JWT auth. Falls back to `VAULT_ROLE` env var |
 
 ### Environment Variable Files
 
@@ -411,6 +458,11 @@ Both modes use the same comment format with hidden `<!-- ig-meta:{...} -->` tags
 | -------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `IG_DEBUG` / `IG_VERBOSE`  | `1`         | Enable verbose/debug output (same as `--verbose` flag)                                                                                                    |
 | `IG_DISABLE_STATE_OUTPUTS` | `1`, `true` | Skip caching workspace outputs in `.ig/state.json`. Outputs are always fetched live from the provider. Use when you don't want secrets persisted to disk. |
+| `VAULT_ADDR`               | URL         | Vault server address (fallback when `vault.address` is not set in ig.yaml)                                                                                |
+| `VAULT_TOKEN`              | string      | Vault token for authentication (highest priority auth method)                                                                                             |
+| `VAULT_ID_TOKEN`           | JWT string  | JWT token for Vault JWT auth (e.g., from GitLab CI `id_tokens`)                                                                                           |
+| `VAULT_ROLE`               | string      | Vault role for JWT auth (fallback when `vault.role` is not set in ig.yaml)                                                                                |
+| `VAULT_AUTH_MOUNT`         | string      | Auth mount path for JWT auth (defaults to `jwt`)                                                                                                          |
 
 ### Drift Detection
 
@@ -484,14 +536,19 @@ When `ig plan` or `ig apply` detects no resource changes in a workspace, it comp
 
 ## Troubleshooting
 
-| Error                                    | Cause                                                | Fix                                                                                                                            |
-| ---------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `Monorepo not found in <dir>`            | No `ig.yaml` with `workspace` field found            | Ensure root `ig.yaml` exists with `workspace` globs                                                                            |
-| `No environment selected`                | No env stored and no `--env` flag                    | Run `ig env select <env>` or pass `--env`                                                                                      |
-| `Single workspace is required`           | `provider` command run from monorepo root            | `cd` into a workspace dir or pass `--project`                                                                                  |
-| Workspace not discovered                 | Directory doesn't match any `workspace` glob         | Check glob patterns in root `ig.yaml`                                                                                          |
-| Provider not detected                    | No `.tf` or `Pulumi.yaml` files in workspace         | Add IaC files or set `provider` explicitly in workspace `ig.yaml`                                                              |
-| `Environment variable 'X' is not set`    | `${X}` used in config but `X` is not in env          | Set the env var or use `$${X}` to escape as literal                                                                            |
-| Provider state locked after failed apply | A previous `ig apply` or `ig destroy` failed mid-run | Run `ig provider force-unlock <lock-id>` in each failed workspace, or `pulumi cancel` for Pulumi                               |
-| Destroy fails with missing upstream      | Upstream workspace already destroyed in a prior run  | ig `>=0.3.0` handles this automatically with placeholder inputs. On older versions, re-apply upstream first or use `--no-deps` |
-| Corrupted state / lost outputs           | Multiple `ig` processes ran concurrently             | Never run ig commands in parallel — ig uses a process-local mutex on `.ig/state.json`. Wait for each command to finish         |
+| Error                                    | Cause                                                   | Fix                                                                                                                            |
+| ---------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `Monorepo not found in <dir>`            | No `ig.yaml` with `workspace` field found               | Ensure root `ig.yaml` exists with `workspace` globs                                                                            |
+| `No environment selected`                | No env stored and no `--env` flag                       | Run `ig env select <env>` or pass `--env`                                                                                      |
+| `Single workspace is required`           | `provider` command run from monorepo root               | `cd` into a workspace dir or pass `--project`                                                                                  |
+| Workspace not discovered                 | Directory doesn't match any `workspace` glob            | Check glob patterns in root `ig.yaml`                                                                                          |
+| Provider not detected                    | No `.tf` or `Pulumi.yaml` files in workspace            | Add IaC files or set `provider` explicitly in workspace `ig.yaml`                                                              |
+| `Environment variable 'X' is not set`    | `${X}` used in config but `X` is not in env             | Set the env var or use `$${X}` to escape as literal                                                                            |
+| Provider state locked after failed apply | A previous `ig apply` or `ig destroy` failed mid-run    | Run `ig provider force-unlock <lock-id>` in each failed workspace, or `pulumi cancel` for Pulumi                               |
+| Destroy fails with missing upstream      | Upstream workspace already destroyed in a prior run     | ig `>=0.3.0` handles this automatically with placeholder inputs. On older versions, re-apply upstream first or use `--no-deps` |
+| Corrupted state / lost outputs           | Multiple `ig` processes ran concurrently                | Never run ig commands in parallel — ig uses a process-local mutex on `.ig/state.json`. Wait for each command to finish         |
+| `Vault authentication failed: no token`  | No `VAULT_TOKEN`, `~/.vault-token`, or `VAULT_ID_TOKEN` | Run `vault login` locally, or set `VAULT_TOKEN` / `VAULT_ID_TOKEN` in CI                                                       |
+| `Vault access denied for path '...'`     | Token lacks permission for the secret path              | Check Vault policies for the token/role                                                                                        |
+| `Vault secret not found at '...'`        | Secret path doesn't exist or wrong KV v2 path           | Ensure the path includes `secret/data/` prefix (KV v2). Verify with `vault kv get <path>`                                      |
+| `no vault configuration provided`        | `${vault:...}` used but no Vault address configured     | Set `VAULT_ADDR` env var or add `vault.address` to root ig.yaml                                                                |
+| `Vault JWT auth requires a role`         | JWT auth attempted without a role                       | Set `vault.role` in ig.yaml or `VAULT_ROLE` env var                                                                            |

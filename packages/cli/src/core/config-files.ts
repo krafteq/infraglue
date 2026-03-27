@@ -1,9 +1,15 @@
 import type { EnvironmentConfig } from '../providers'
 
+export interface VaultConfig {
+  address?: string
+  role?: string
+}
+
 export interface MonorepoConfig {
   workspace?: string[]
   output?: Record<string, string>
   vars?: Record<string, string>
+  vault?: VaultConfig
   [key: string]: unknown
 }
 

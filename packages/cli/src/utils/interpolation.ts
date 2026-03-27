@@ -1,15 +1,17 @@
 import { UserError } from './errors.js'
+import type { VaultClient } from './vault-client.js'
 
 /**
- * Interpolate `${VAR}` references in a string with values from environment variables.
+ * Interpolate `${VAR}` and `${vault:path#field}` references in a string.
  * Use `$${VAR}` to produce a literal `${VAR}` in the output (escape syntax).
- * Throws UserError if a referenced variable is not set.
+ * Throws UserError if a referenced variable is not set or a vault secret cannot be resolved.
  */
-export function interpolateString(
+export async function interpolateString(
   value: string,
   env: Record<string, string | undefined> = process.env,
   context?: string,
-): string {
+  vaultClient?: VaultClient,
+): Promise<string> {
   let result = ''
   let i = 0
 
@@ -25,17 +27,51 @@ export function interpolateString(
         }
       }
 
-      // Check for interpolation: ${VAR}
+      // Check for interpolation: ${VAR} or ${vault:path#field}
       if (value[i + 1] === '{') {
         const closeBrace = value.indexOf('}', i + 2)
         if (closeBrace !== -1) {
           const varName = value.slice(i + 2, closeBrace)
-          const varValue = env[varName]
-          if (varValue === undefined) {
-            const ctx = context ? ` (in ${context})` : ''
-            throw new UserError(`Environment variable '${varName}' is not set${ctx}`)
+
+          if (varName.startsWith('vault:')) {
+            const ref = varName.slice('vault:'.length)
+            const hashIndex = ref.indexOf('#')
+            if (hashIndex === -1) {
+              const ctx = context ? ` (in ${context})` : ''
+              throw new UserError(
+                `Invalid vault reference '\${${varName}}': expected format \${vault:path#field}${ctx}`,
+              )
+            }
+            const path = ref.slice(0, hashIndex)
+            const field = ref.slice(hashIndex + 1)
+            if (!path || !field) {
+              const ctx = context ? ` (in ${context})` : ''
+              throw new UserError(`Invalid vault reference '\${${varName}}': path and field must not be empty${ctx}`)
+            }
+            if (!vaultClient) {
+              const ctx = context ? ` (in ${context})` : ''
+              throw new UserError(
+                `Vault reference '\${${varName}}' found but no vault configuration provided${ctx}. Set VAULT_ADDR or add vault.address to root ig.yaml`,
+              )
+            }
+            try {
+              result += await vaultClient.getSecret(path, field)
+            } catch (error) {
+              if (error instanceof UserError) {
+                const ctx = context ? ` (in ${context})` : ''
+                throw new UserError(`${error.message}${ctx}`)
+              }
+              throw error
+            }
+          } else {
+            const varValue = env[varName]
+            if (varValue === undefined) {
+              const ctx = context ? ` (in ${context})` : ''
+              throw new UserError(`Environment variable '${varName}' is not set${ctx}`)
+            }
+            result += varValue
           }
-          result += varValue
+
           i = closeBrace + 1
           continue
         }
@@ -54,23 +90,28 @@ export function interpolateString(
  * Handles strings, arrays of strings, and Record<string, string> objects.
  * Non-string values pass through unchanged.
  */
-export function interpolateConfig<T>(
+export async function interpolateConfig<T>(
   value: T,
   env: Record<string, string | undefined> = process.env,
   context?: string,
-): T {
+  vaultClient?: VaultClient,
+): Promise<T> {
   if (typeof value === 'string') {
-    return interpolateString(value, env, context) as T
+    return (await interpolateString(value, env, context, vaultClient)) as T
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => interpolateConfig(item, env, context)) as T
+    const results = []
+    for (const item of value) {
+      results.push(await interpolateConfig(item, env, context, vaultClient))
+    }
+    return results as T
   }
 
   if (value !== null && typeof value === 'object') {
     const result: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(value)) {
-      result[k] = interpolateConfig(v, env, context)
+      result[k] = await interpolateConfig(v, env, context, vaultClient)
     }
     return result as T
   }

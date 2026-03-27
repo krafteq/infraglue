@@ -26,6 +26,11 @@ export const workspaceConfigSchema = z.object({
   alias: z.string().optional(),
 })
 
+export const vaultConfigSchema = z.object({
+  address: z.string().optional(),
+  role: z.string().optional(),
+})
+
 export const monorepoConfigSchema = z.object({
   workspace: z.array(z.string()).min(1, 'At least one workspace glob is required'),
   output: z.record(z.string()).optional(),
@@ -34,6 +39,7 @@ export const monorepoConfigSchema = z.object({
     .optional()
     .nullable()
     .transform((v) => v ?? undefined),
+  vault: vaultConfigSchema.optional(),
 })
 
 export function formatZodError(error: ZodError): string {

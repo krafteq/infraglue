@@ -6,6 +6,7 @@ import { glob } from 'node:fs/promises'
 import type { MonorepoConfig, WorkspaceConfig } from './config-files.js'
 import { globalConfig } from './global-config.js'
 import { logger, UserError, ConfigError, interpolateConfig, loadDotEnvFiles } from '../utils/index.js'
+import { VaultClient } from '../utils/vault-client.js'
 import { getProvider, providers as knownProviders } from '../providers/index.js'
 import type { EnvironmentConfig } from '../providers/index.js'
 import { monorepoConfigSchema, workspaceConfigSchema, formatZodError } from './schemas.js'
@@ -45,8 +46,12 @@ export async function tryReadMonorepo(rootPath: string, envName?: string): Promi
       throw new ConfigError(formatZodError(parsed.error), configPath)
     }
     const cfg = raw as MonorepoConfig
-    const rootVars = interpolateConfig(parsed.data.vars ?? {}, undefined, 'root ig.yaml vars')
-    const workspaces = await readWorkspaces(cfg, rootPath, rootVars)
+    const vaultAddress = cfg.vault?.address ?? process.env['VAULT_ADDR']
+    const vaultClient = vaultAddress
+      ? new VaultClient(vaultAddress, { role: cfg.vault?.role ?? process.env['VAULT_ROLE'] })
+      : undefined
+    const rootVars = await interpolateConfig(parsed.data.vars ?? {}, undefined, 'root ig.yaml vars', vaultClient)
+    const workspaces = await readWorkspaces(cfg, rootPath, rootVars, vaultClient)
 
     const exports = Object.entries(cfg.output || {}).map(([key, value]) => {
       const [workspace, outputKey] = value.split(':')
@@ -77,6 +82,7 @@ async function readWorkspaces(
   monorepoConfig: MonorepoConfig,
   rootPath: string,
   rootVars: Record<string, string>,
+  vaultClient?: VaultClient,
 ): Promise<Workspace[]> {
   if (!monorepoConfig.workspace) {
     return []
@@ -98,15 +104,16 @@ async function readWorkspaces(
     }),
   )
 
-  return (await Promise.all(workspacePaths.flat().map((path) => getWorkspace(path, rootPath, rootVars)))).filter(
-    (x) => !!x,
-  )
+  return (
+    await Promise.all(workspacePaths.flat().map((path) => getWorkspace(path, rootPath, rootVars, vaultClient)))
+  ).filter((x) => !!x)
 }
 
 async function getWorkspace(
   path: string,
   rootPath: string,
   rootVars: Record<string, string>,
+  vaultClient?: VaultClient,
 ): Promise<Workspace | null> {
   const raw = await readConfigFile(path)
   if (raw) {
@@ -156,28 +163,30 @@ async function getWorkspace(
     providerInstance,
     Object.fromEntries(injectionEntries),
     resolvedDeps,
-    interpolateEnvConfigs(config?.envs ?? {}, path),
+    await interpolateEnvConfigs(config?.envs ?? {}, path, vaultClient),
     rootVars,
   )
 }
 
-function interpolateEnvConfigs(
+async function interpolateEnvConfigs(
   envs: Record<string, EnvironmentConfig>,
   workspacePath: string,
-): Record<string, EnvironmentConfig> {
+  vaultClient?: VaultClient,
+): Promise<Record<string, EnvironmentConfig>> {
   const result: Record<string, EnvironmentConfig> = {}
   for (const [envName, envConfig] of Object.entries(envs)) {
     const ctx = `workspace ${workspacePath} env '${envName}'`
     const interpolated: EnvironmentConfig = {}
     if (envConfig.backend_file !== undefined)
-      interpolated.backend_file = interpolateConfig(envConfig.backend_file, undefined, ctx)
+      interpolated.backend_file = await interpolateConfig(envConfig.backend_file, undefined, ctx, vaultClient)
     if (envConfig.backend_type !== undefined)
-      interpolated.backend_type = interpolateConfig(envConfig.backend_type, undefined, ctx)
+      interpolated.backend_type = await interpolateConfig(envConfig.backend_type, undefined, ctx, vaultClient)
     if (envConfig.backend_config !== undefined)
-      interpolated.backend_config = interpolateConfig(envConfig.backend_config, undefined, ctx)
-    if (envConfig.vars !== undefined) interpolated.vars = interpolateConfig(envConfig.vars, undefined, ctx)
+      interpolated.backend_config = await interpolateConfig(envConfig.backend_config, undefined, ctx, vaultClient)
+    if (envConfig.vars !== undefined)
+      interpolated.vars = await interpolateConfig(envConfig.vars, undefined, ctx, vaultClient)
     if (envConfig.var_files !== undefined)
-      interpolated.var_files = interpolateConfig(envConfig.var_files, undefined, ctx)
+      interpolated.var_files = await interpolateConfig(envConfig.var_files, undefined, ctx, vaultClient)
     result[envName] = interpolated
   }
   return result
