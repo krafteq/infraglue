@@ -678,4 +678,4 @@ getPackageJsonVersion()
   })
   .catch(() => {})
 
-program.parse()
+program.parseAsync()
