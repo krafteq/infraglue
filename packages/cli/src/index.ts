@@ -679,7 +679,7 @@ getPackageJsonVersion()
   })
   .catch(() => {})
 
-program.parseAsync().catch((err: unknown) => {
+await program.parseAsync().catch((err: unknown) => {
   if (err instanceof Error) handleError(err)
   else process.exit(1)
 })
