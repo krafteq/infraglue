@@ -1,6 +1,6 @@
 {
   "name": "@krafteq/infraglue-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Webhook relay service for InfraGlue — bridges git host approval signals to CI pipeline triggers",
   "main": "dist/index.js",
