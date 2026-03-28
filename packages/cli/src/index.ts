@@ -413,11 +413,12 @@ Examples:
       const monorepo = requireMonorepo()
       env = await resolveEnv(env)
       const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, false, env)
-      await runGitLabCi({
+      const exitCode = await runGitLabCi({
         execContext,
         formatter: getFormatter(format),
         approvalEmoji,
       })
+      process.exit(exitCode)
     },
   )
 
@@ -678,4 +679,7 @@ getPackageJsonVersion()
   })
   .catch(() => {})
 
-program.parseAsync()
+program.parseAsync().catch((err: unknown) => {
+  if (err instanceof Error) handleError(err)
+  else process.exit(1)
+})

@@ -162,11 +162,11 @@ describe('runGitLabCi', () => {
     mockListNotes.mockResolvedValue([makeNote(100, 1)])
     mockListNoteAwardEmojis.mockResolvedValue([])
 
-    await runGitLabCi({ execContext: {} as never, formatter: makeFormatter() })
+    const exitCode = await runGitLabCi({ execContext: {} as never, formatter: makeFormatter() })
 
     expect(mockExec).not.toHaveBeenCalled()
     expect(mockPlan).not.toHaveBeenCalled()
-    expect(process.exitCode).toBe(0)
+    expect(exitCode).toBe(0)
   })
 
   it('PARTIAL state: applies approved level, then plans remaining', async () => {

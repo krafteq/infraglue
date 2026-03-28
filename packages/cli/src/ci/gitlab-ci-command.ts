@@ -91,7 +91,7 @@ function determineMRState(freshComments: IgComment[], hasStaleComments: boolean)
 
 // ---------- Main command ----------
 
-export async function runGitLabCi(opts: GitLabCiOptions): Promise<void> {
+export async function runGitLabCi(opts: GitLabCiOptions): Promise<number> {
   if (!GitLabPipeline.isInPipeline() || !GitLabPipeline.getMergeRequestIid()) {
     throw new UserError('ig ci must run inside a GitLab merge request pipeline.')
   }
@@ -132,15 +132,13 @@ export async function runGitLabCi(opts: GitLabCiOptions): Promise<void> {
     case 'PENDING': {
       const levels = freshComments.map((c) => c.metadata.level).sort((a, b) => a - b)
       logger.info(`Waiting for approvals on level(s): ${levels.join(', ')}`)
-      process.exitCode = 0
-      return
+      return 0
     }
 
     case 'FRESH':
     case 'STALE': {
       // Plan from the beginning
-      await planAndPostComments(executor, opts.formatter, gitlabClient, planId, commitSha, 0)
-      return
+      return await planAndPostComments(executor, opts.formatter, gitlabClient, planId, commitSha, 0)
     }
 
     case 'PARTIAL':
@@ -158,8 +156,15 @@ export async function runGitLabCi(opts: GitLabCiOptions): Promise<void> {
 
       // Plan remaining levels
       const commentedLevels = new Set(freshComments.map((c) => c.metadata.level))
-      await planAndPostComments(executor, opts.formatter, gitlabClient, planId, commitSha, maxApproved, commentedLevels)
-      return
+      return await planAndPostComments(
+        executor,
+        opts.formatter,
+        gitlabClient,
+        planId,
+        commitSha,
+        maxApproved,
+        commentedLevels,
+      )
     }
   }
 }
@@ -197,7 +202,7 @@ async function planAndPostComments(
   commitSha: string,
   startFromLevel: number,
   existingCommentedLevels?: Set<number>,
-): Promise<void> {
+): Promise<number> {
   const onLevelPlanned = async (data: LevelPlanReport) => {
     const levelNumber = data.levelIndex + 1
     if (existingCommentedLevels?.has(levelNumber)) {
@@ -226,15 +231,14 @@ async function planAndPostComments(
       onLevelPlanned,
     })
 
-    if (result.hasChanges) {
-      process.exitCode = 2
-    }
+    return result.hasChanges ? 2 : 0
   } catch (error) {
     // If planning fails due to missing inputs (upstream level not yet applied),
     // this is expected — we've already posted comments for the levels we could plan.
     const msg = error instanceof Error ? error.message : String(error)
     if (msg.includes('is not found') || msg.includes('no outputs available')) {
       logger.info('Cannot plan further levels — waiting for upstream approval and apply')
+      return 2
     } else {
       throw error
     }
