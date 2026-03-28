@@ -46,9 +46,11 @@ export async function tryReadMonorepo(rootPath: string, envName?: string): Promi
       throw new ConfigError(formatZodError(parsed.error), configPath)
     }
     const cfg = raw as MonorepoConfig
-    const vaultAddress = cfg.vault?.address ?? process.env['VAULT_ADDR']
+    const vaultAddress = cfg.vault?.address ?? process.env['VAULT_ADDR'] ?? process.env['VAULT_SERVER_URL']
     const vaultClient = vaultAddress
-      ? new VaultClient(vaultAddress, { role: cfg.vault?.role ?? process.env['VAULT_ROLE'] })
+      ? new VaultClient(vaultAddress, {
+          role: cfg.vault?.role ?? process.env['VAULT_ROLE'] ?? process.env['VAULT_AUTH_ROLE'],
+        })
       : undefined
     const rootVars = await interpolateConfig(parsed.data.vars ?? {}, undefined, 'root ig.yaml vars', vaultClient)
     const workspaces = await readWorkspaces(cfg, rootPath, rootVars, vaultClient)

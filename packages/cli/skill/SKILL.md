@@ -459,10 +459,13 @@ Both modes use the same comment format with hidden `<!-- ig-meta:{...} -->` tags
 | `IG_DEBUG` / `IG_VERBOSE`  | `1`         | Enable verbose/debug output (same as `--verbose` flag)                                                                                                    |
 | `IG_DISABLE_STATE_OUTPUTS` | `1`, `true` | Skip caching workspace outputs in `.ig/state.json`. Outputs are always fetched live from the provider. Use when you don't want secrets persisted to disk. |
 | `VAULT_ADDR`               | URL         | Vault server address (fallback when `vault.address` is not set in ig.yaml)                                                                                |
+| `VAULT_SERVER_URL`         | URL         | GitLab CI alias for `VAULT_ADDR` (used as fallback)                                                                                                       |
 | `VAULT_TOKEN`              | string      | Vault token for authentication (highest priority auth method)                                                                                             |
 | `VAULT_ID_TOKEN`           | JWT string  | JWT token for Vault JWT auth (e.g., from GitLab CI `id_tokens`)                                                                                           |
 | `VAULT_ROLE`               | string      | Vault role for JWT auth (fallback when `vault.role` is not set in ig.yaml)                                                                                |
+| `VAULT_AUTH_ROLE`          | string      | GitLab CI alias for `VAULT_ROLE` (used as fallback)                                                                                                       |
 | `VAULT_AUTH_MOUNT`         | string      | Auth mount path for JWT auth (defaults to `jwt`)                                                                                                          |
+| `VAULT_AUTH_PATH`          | string      | GitLab CI alias for `VAULT_AUTH_MOUNT` (used as fallback)                                                                                                 |
 
 ### Drift Detection
 

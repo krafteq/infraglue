@@ -2,6 +2,7 @@ import { readFile } from 'fs/promises'
 import { homedir } from 'os'
 import { join } from 'path'
 import { UserError } from './errors.js'
+import { logger } from './logger.js'
 
 export interface VaultClientOptions {
   role?: string | undefined
@@ -22,6 +23,7 @@ export class VaultClient {
   }
 
   async getSecret(path: string, field: string): Promise<string> {
+    logger.debug(`[vault] reading ${path}#${field}...`)
     const data = await this.fetchSecret(path)
     const value = data[field]
     if (value === undefined) {
@@ -32,6 +34,7 @@ export class VaultClient {
     if (typeof value !== 'string') {
       throw new UserError(`Vault secret field '${field}' at '${path}' is not a string`)
     }
+    logger.debug(`[vault] reading ${path}#${field}... OK`)
     return value
   }
 
@@ -84,13 +87,19 @@ export class VaultClient {
   private async doResolveToken(): Promise<string> {
     // Priority 1: VAULT_TOKEN env var
     const envToken = this.env['VAULT_TOKEN']
-    if (envToken) return envToken
+    if (envToken) {
+      logger.debug('[vault] authenticated via VAULT_TOKEN env var')
+      return envToken
+    }
 
     // Priority 2: ~/.vault-token file
     try {
       const tokenFile = join(homedir(), '.vault-token')
       const token = (await readFile(tokenFile, 'utf-8')).trim()
-      if (token) return token
+      if (token) {
+        logger.debug('[vault] authenticated via ~/.vault-token')
+        return token
+      }
     } catch {
       // file doesn't exist or is unreadable, try next method
     }
@@ -98,7 +107,10 @@ export class VaultClient {
     // Priority 3: JWT auth via VAULT_ID_TOKEN
     const jwt = this.env['VAULT_ID_TOKEN']
     if (jwt) {
-      return this.authenticateJwt(jwt)
+      logger.debug('[vault] authenticating via JWT (VAULT_ID_TOKEN)...')
+      const token = await this.authenticateJwt(jwt)
+      logger.debug('[vault] JWT authentication OK')
+      return token
     }
 
     throw new UserError(
@@ -107,14 +119,14 @@ export class VaultClient {
   }
 
   private async authenticateJwt(jwt: string): Promise<string> {
-    const role = this.role ?? this.env['VAULT_ROLE']
+    const role = this.role ?? this.env['VAULT_ROLE'] ?? this.env['VAULT_AUTH_ROLE']
     if (!role) {
       throw new UserError(
         "Vault JWT auth requires a role. Set 'role' in vault config or VAULT_ROLE environment variable",
       )
     }
 
-    const mount = this.env['VAULT_AUTH_MOUNT'] ?? 'jwt'
+    const mount = this.env['VAULT_AUTH_MOUNT'] ?? this.env['VAULT_AUTH_PATH'] ?? 'jwt'
     const url = `${this.address}/v1/auth/${mount}/login`
 
     let response: Response
