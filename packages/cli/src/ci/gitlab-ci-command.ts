@@ -62,6 +62,7 @@ export interface GitLabCiOptions {
 // ---------- Helpers ----------
 
 export function markCommentAsStale(body: string): string {
+  if (/\(stale — new commits pushed\)/.test(body)) return body
   return body
     .replace(/^## InfraGlue Plan/m, '## ~~InfraGlue Plan')
     .replace(/^(## ~~InfraGlue Plan[^\n]*)/m, '$1~~ (stale — new commits pushed)')
