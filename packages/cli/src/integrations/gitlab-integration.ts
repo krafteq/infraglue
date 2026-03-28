@@ -204,6 +204,14 @@ export interface LevelCommentData {
  * Format an MR comment for a single execution level.
  * Includes formatted plan per workspace, approval hint, and ig-meta tag.
  */
+export function formatStatusComment(status: 'no-changes' | 'all-applied', commitSha?: string): string {
+  const title =
+    status === 'no-changes'
+      ? '## InfraGlue Plan — No changes\n\nAll workspaces are up to date. No action required.'
+      : '## InfraGlue Plan — All levels applied\n\nAll approved levels have been applied. No remaining changes.'
+  return commitSha ? `${title}\n\n<!-- ig-status:${status} sha:${commitSha} -->` : title
+}
+
 export function formatLevelComment(data: LevelCommentData): string {
   const header = `## InfraGlue Plan — Level ${data.levelNumber}/${data.levelsCount}\n\n`
 

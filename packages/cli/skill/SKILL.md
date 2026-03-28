@@ -424,9 +424,9 @@ infraglue:
 
 On each pipeline run, `ig ci` reads MR comments + emoji reactions and determines what to do:
 
-1. **No comments** — plans forward, posts one comment per level that has changes
+1. **No comments** — plans forward, posts one comment per level that has changes (or a "no changes" comment if everything is up to date)
 2. **Comments exist, none approved** — exits (waiting for approvals)
-3. **Some levels approved (thumbsup)** — applies approved levels, plans remaining, posts new comments
+3. **Some levels approved (thumbsup)** — applies approved levels, plans remaining, posts new comments (or "all applied" comment if no remaining changes)
 4. **Code changed since last plan** — marks old comments as stale, re-plans from scratch
 
 After approving a level (thumbsup on the comment), manually re-trigger the pipeline (`/run_pipeline` or "Run pipeline" button in MR). Levels with no changes are auto-skipped.

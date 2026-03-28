@@ -5,6 +5,7 @@ import {
   GitLabClient,
   GitLabPipeline,
   formatLevelComment,
+  formatStatusComment,
   type GitLabNote,
 } from '../integrations/gitlab-integration.js'
 import { NO_TTY_CLI_INTEGRATION } from '../integrations/no-tty-cli-integration.js'
@@ -138,7 +139,12 @@ export async function runGitLabCi(opts: GitLabCiOptions): Promise<number> {
     case 'FRESH':
     case 'STALE': {
       // Plan from the beginning
-      return await planAndPostComments(executor, opts.formatter, gitlabClient, planId, commitSha, 0)
+      const exitCode = await planAndPostComments(executor, opts.formatter, gitlabClient, planId, commitSha, 0)
+      if (exitCode === 0) {
+        await gitlabClient.addComment(formatStatusComment('no-changes', commitSha))
+        logger.info('Posted no-changes comment to GitLab MR')
+      }
+      return exitCode
     }
 
     case 'PARTIAL':
@@ -156,7 +162,7 @@ export async function runGitLabCi(opts: GitLabCiOptions): Promise<number> {
 
       // Plan remaining levels
       const commentedLevels = new Set(freshComments.map((c) => c.metadata.level))
-      return await planAndPostComments(
+      const exitCode = await planAndPostComments(
         executor,
         opts.formatter,
         gitlabClient,
@@ -165,6 +171,11 @@ export async function runGitLabCi(opts: GitLabCiOptions): Promise<number> {
         maxApproved,
         commentedLevels,
       )
+      if (exitCode === 0) {
+        await gitlabClient.addComment(formatStatusComment('all-applied', commitSha))
+        logger.info('Posted all-applied comment to GitLab MR')
+      }
+      return exitCode
     }
   }
 }
