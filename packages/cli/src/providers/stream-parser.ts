@@ -7,6 +7,7 @@ export function parseTerraformStreamLine(line: string): ProviderEvent | null {
   } catch {
     return null
   }
+  if (!obj || typeof obj !== 'object') return null
 
   const type = obj.type as string | undefined
 
@@ -86,6 +87,7 @@ export function parsePulumiStreamLine(line: string): ProviderEvent | null {
   } catch {
     return null
   }
+  if (!obj || typeof obj !== 'object') return null
 
   if (obj.resourcePreEvent) {
     const ev = obj.resourcePreEvent as {
