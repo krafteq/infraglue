@@ -6,7 +6,6 @@ import type { GitLabNote, GitLabAwardEmoji } from '../integrations/gitlab-integr
 function setGitLabEnv(overrides: Record<string, string> = {}) {
   const defaults: Record<string, string> = {
     GITLAB_CI: 'true',
-    GITLAB_MERGE_REQUEST_IID: '42',
     CI_MERGE_REQUEST_PROJECT_ID: '1',
     CI_MERGE_REQUEST_IID: '42',
     CI_API_V4_URL: 'https://gitlab.example.com/api/v4',
@@ -22,7 +21,6 @@ function setGitLabEnv(overrides: Record<string, string> = {}) {
 function clearGitLabEnv() {
   for (const key of [
     'GITLAB_CI',
-    'GITLAB_MERGE_REQUEST_IID',
     'CI_MERGE_REQUEST_PROJECT_ID',
     'CI_MERGE_REQUEST_IID',
     'CI_API_V4_URL',

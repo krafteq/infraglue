@@ -113,8 +113,7 @@ export class GitLabPipeline {
    * Get merge request IID from pipeline environment variables
    */
   static getMergeRequestIid(): string | null {
-    // GITLAB_MERGE_REQUEST_IID is available in merge request pipelines
-    return process.env['GITLAB_MERGE_REQUEST_IID'] || null
+    return process.env['CI_MERGE_REQUEST_IID'] || null
   }
 
   /**
