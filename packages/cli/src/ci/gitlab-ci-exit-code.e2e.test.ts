@@ -1,18 +1,15 @@
-import { execFile } from 'child_process'
+import { spawn } from 'child_process'
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'http'
 import { join } from 'path'
 
 const CLI_SOURCE = join(__dirname, '..', 'index.ts')
 const CLI_DIST = join(__dirname, '..', '..', 'dist', 'index.js')
+const CLI_BIN = join(__dirname, '..', '..', 'bin', 'ig.js')
 const FIXTURE_DIR = join(__dirname, '..', 'core', '__fixtures__', 'simple-chain')
 
-function startMockGitLabApi(): Promise<{ server: Server; port: number; requests: { method: string; url: string }[] }> {
+function startMockGitLabApi(): Promise<{ server: Server; port: number }> {
   return new Promise((resolve) => {
-    const requests: { method: string; url: string }[] = []
-
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-      requests.push({ method: req.method ?? '', url: req.url ?? '' })
-
       let body = ''
       req.on('data', (chunk: Buffer) => {
         body += chunk.toString()
@@ -23,13 +20,11 @@ function startMockGitLabApi(): Promise<{ server: Server; port: number; requests:
           res.end('[]')
           return
         }
-
         if (req.method === 'POST' && req.url?.includes('/notes')) {
           res.writeHead(201, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ id: 1, body }))
           return
         }
-
         res.writeHead(404)
         res.end('Not found')
       })
@@ -38,36 +33,36 @@ function startMockGitLabApi(): Promise<{ server: Server; port: number; requests:
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address()
       const port = typeof addr === 'object' && addr ? addr.port : 0
-      resolve({ server, port, requests })
+      resolve({ server, port })
     })
   })
 }
 
-function runCli(
-  entrypoint: string,
+function runIg(
+  cmd: string,
   args: string[],
   env: Record<string, string>,
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const usesTsx = entrypoint.endsWith('.ts')
-  const cmd = usesTsx ? 'npx' : process.execPath
-  const cmdArgs = usesTsx ? ['tsx', entrypoint, ...args] : [entrypoint, ...args]
-
+): Promise<{ exitCode: number | null; stderr: string; signal: NodeJS.Signals | null }> {
   return new Promise((resolve) => {
-    const child = execFile(
-      cmd,
-      cmdArgs,
-      {
-        env: { ...process.env, ...env },
-        timeout: 30_000,
-      },
-      (error, stdout, stderr) => {
-        resolve({
-          exitCode: error?.code ?? child.exitCode ?? 0,
-          stdout: stdout.toString(),
-          stderr: stderr.toString(),
-        })
-      },
-    )
+    const child = spawn(cmd, args, {
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    let stderr = ''
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString()
+    })
+    child.stdout.on('data', () => {})
+
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM')
+    }, 25_000)
+
+    child.on('close', (code, signal) => {
+      clearTimeout(timer)
+      resolve({ exitCode: code, stderr, signal })
+    })
   })
 }
 
@@ -94,25 +89,33 @@ describe('ig ci exit code (e2e)', () => {
     mockApi.server.close()
   })
 
-  describe.each([
-    { label: 'source (tsx)', entrypoint: CLI_SOURCE },
-    { label: 'built (dist)', entrypoint: CLI_DIST },
-  ])('$label', ({ entrypoint }) => {
-    it('should exit with code 2 when plan has changes (FRESH state)', async () => {
-      const result = await runCli(entrypoint, ['-d', FIXTURE_DIR, 'ci', '--env', 'dev'], makeGitLabEnv(mockApi.port))
+  const entrypoints = [
+    { label: 'source (tsx)', cmd: 'npx', makeArgs: (a: string[]) => ['tsx', CLI_SOURCE, ...a] },
+    { label: 'dist (node)', cmd: process.execPath, makeArgs: (a: string[]) => [CLI_DIST, ...a] },
+    { label: 'bin/ig.js (node)', cmd: process.execPath, makeArgs: (a: string[]) => [CLI_BIN, ...a] },
+  ]
 
-      console.log(`[${entrypoint.includes('dist') ? 'dist' : 'src'}] EXIT CODE: ${result.exitCode}`)
+  describe.each(entrypoints)('$label', ({ label, cmd, makeArgs }) => {
+    it('should exit 2 when plan has changes (FRESH state)', async () => {
+      const igArgs = ['-d', FIXTURE_DIR, 'ci', '--env', 'dev']
+      const result = await runIg(cmd, makeArgs(igArgs), makeGitLabEnv(mockApi.port))
+
+      console.log(`[${label}] status=${result.exitCode} signal=${result.signal}`)
       if (result.exitCode !== 2) {
-        console.log('STDOUT:', result.stdout)
-        console.log('STDERR:', result.stderr)
+        console.log('STDERR:', result.stderr.slice(-500))
       }
 
+      expect(result.signal).toBeNull()
       expect(result.exitCode).toBe(2)
     }, 30_000)
 
-    it('should exit with code 2 (UserError) when not in MR pipeline', async () => {
-      const result = await runCli(entrypoint, ['-d', FIXTURE_DIR, 'ci', '--env', 'dev'], {})
+    it('should exit 2 (UserError) when not in MR pipeline', async () => {
+      const igArgs = ['-d', FIXTURE_DIR, 'ci', '--env', 'dev']
+      const result = await runIg(cmd, makeArgs(igArgs), {})
 
+      console.log(`[${label}] not-in-pipeline status=${result.exitCode}`)
+
+      expect(result.signal).toBeNull()
       expect(result.exitCode).toBe(2)
     }, 30_000)
   })
