@@ -24,10 +24,16 @@ import {
   type IPlanRenderer,
 } from '../rendering/index.js'
 
-interface LevelPlanEntry {
+export interface LevelPlanEntry {
   workspace: Workspace
   inputs: ProviderInput
   plan: ProviderPlan
+}
+
+export interface LevelPlanReport {
+  levelIndex: number
+  levelPlans: LevelPlanEntry[]
+  levelsCount: number
 }
 
 export class MultistageExecutor {
@@ -300,7 +306,7 @@ export class MultistageExecutor {
     await this.validateEnv()
 
     const executionPlan = new ExecutionPlanBuilder(this.ctx).build()
-    const startIndex = await this.resolveStartLevel(executionPlan)
+    const startIndex = opts.startFromLevel ?? (await this.resolveStartLevel(executionPlan))
     logger.info(`\n Selected Environment: ${this.ctx.env}`)
 
     let hasAnyChanges = false
@@ -325,6 +331,14 @@ export class MultistageExecutor {
         opts.formatter,
         opts.detailed ? { skipFormattedPlan: true } : undefined,
       )
+
+      if (opts.onLevelPlanned) {
+        await opts.onLevelPlanned({
+          levelIndex,
+          levelPlans,
+          levelsCount: executionPlan.levelsCount,
+        })
+      }
 
       if (opts.detailed) {
         for (const { workspace, plan } of levelPlans) {
@@ -471,7 +485,10 @@ export class MultistageExecutor {
     const startIndex = await this.resolveStartLevel(executionPlan)
     logger.info(`\n Selected Environment: ${this.ctx.env}`)
 
-    for (let levelIndex = startIndex; levelIndex < executionPlan.levelsCount; levelIndex++) {
+    const endLevel =
+      opts.upToLevel !== undefined ? Math.min(opts.upToLevel, executionPlan.levelsCount) : executionPlan.levelsCount
+
+    for (let levelIndex = startIndex; levelIndex < endLevel; levelIndex++) {
       const level = executionPlan.levels[levelIndex]
 
       logger.info(`\n🔧 Processing Level ${levelIndex + 1}/${executionPlan.levelsCount}`)
@@ -735,12 +752,15 @@ export interface IExecOptions {
   formatter: IFormatter
   integration: IIntegration
   approve?: number[] | 'all' | undefined
-  preview?: boolean
+  preview?: boolean | undefined
+  upToLevel?: number | undefined
 }
 
 export interface IPlanExecOptions {
   formatter: IFormatter
-  detailed?: boolean
+  detailed?: boolean | undefined
+  onLevelPlanned?: ((data: LevelPlanReport) => Promise<void>) | undefined
+  startFromLevel?: number | undefined
 }
 
 export interface PlanResult {

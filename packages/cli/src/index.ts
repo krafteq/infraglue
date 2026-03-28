@@ -13,10 +13,14 @@ import {
   type Workspace,
 } from './core/index.js'
 import { fileURLToPath } from 'url'
+import { randomUUID } from 'crypto'
 import { getFormatter } from './formatters/index.js'
 import { getIntegration } from './integrations/index.js'
+import { GitLabClient, GitLabPipeline, formatLevelComment } from './integrations/gitlab-integration.js'
+import type { LevelPlanReport } from './core/multistage-executor.js'
 import { logger, UserError, IgError, isDebug, formatUnexpectedError, detectIntegration } from './utils/index.js'
 import { generateBashCompletion, generateZshCompletion, generateFishCompletion } from './completions.js'
+import { runGitLabCi } from './ci/gitlab-ci-command.js'
 import { installSkill } from './install-skill.js'
 import pc from 'picocolors'
 
@@ -89,6 +93,7 @@ interface IApplyOptions {
   env: string
   project?: string
   startWithProject?: string
+  upToLevel?: number
 }
 
 const execCommands = [
@@ -133,9 +138,32 @@ program
         env,
         startWithWorkspace,
       )
+
+      let onLevelPlanned: ((data: LevelPlanReport) => Promise<void>) | undefined
+
+      if (GitLabPipeline.isInPipeline() && GitLabPipeline.getMergeRequestIid()) {
+        const gitlabClient = new GitLabClient()
+        const planId = process.env['CI_PIPELINE_ID'] ?? randomUUID()
+
+        onLevelPlanned = async (data: LevelPlanReport) => {
+          const comment = formatLevelComment({
+            levelNumber: data.levelIndex + 1,
+            levelsCount: data.levelsCount,
+            workspacePlans: data.levelPlans.map((lp) => ({
+              workspaceName: lp.workspace.name,
+              plan: lp.plan,
+            })),
+            planId,
+          })
+          await gitlabClient.addComment(comment)
+          logger.info(`Posted plan comment for Level ${data.levelIndex + 1} to GitLab MR`)
+        }
+      }
+
       const result = await new MultistageExecutor(execContext).plan({
         formatter: getFormatter(format),
         detailed: detailed ?? false,
+        onLevelPlanned,
       })
       process.exitCode = result.hasChanges ? 2 : 0
     },
@@ -168,6 +196,13 @@ for (const execCmd of execCommands) {
     .option('-e, --env <env>', 'environment to apply. If provided, the environment will be selected before applying')
     .option('--no-deps', 'Ignore dependencies')
     .option('--start-with-project <project>', 'Skip levels before this project, use cached outputs')
+    .option('-u, --up-to-level <level>', 'Stop execution after this level number (1-indexed)', (value: string) => {
+      const n = parseInt(value, 10)
+      if (isNaN(n) || n < 1) {
+        throw new Error(`Invalid level number: "${value}". Must be a positive integer.`)
+      }
+      return n
+    })
     .action(
       async ({
         format,
@@ -177,8 +212,22 @@ for (const execCmd of execCommands) {
         project,
         deps,
         startWithProject,
+        upToLevel,
       }: IApplyOptions & { deps: boolean }) => {
         const monorepo = requireMonorepo()
+
+        // Read IG_ env vars from bridge-triggered pipeline
+        const igAction = process.env['IG_ACTION']
+        const igApprovedLevel = process.env['IG_APPROVED_LEVEL']
+        if (igAction === 'apply' && igApprovedLevel) {
+          const level = parseInt(igApprovedLevel, 10)
+          if (!isNaN(level) && level >= 1) {
+            logger.info(`Bridge trigger detected: IG_ACTION=${igAction} IG_APPROVED_LEVEL=${igApprovedLevel}`)
+            if (approve === undefined) approve = 'all'
+            if (upToLevel === undefined) upToLevel = level
+          }
+        }
+
         env = await resolveEnv(env)
         validateStartWithProject(startWithProject, project, deps)
         const startWithWorkspace = startWithProject ? monorepo.getWorkspace(startWithProject) : undefined
@@ -197,6 +246,7 @@ for (const execCmd of execCommands) {
           integration: getIntegration(detectIntegration(integration)),
           formatter: getFormatter(format),
           preview: false,
+          upToLevel,
         })
       },
     )
@@ -332,6 +382,47 @@ Examples:
   })
 
 program
+  .command('ci')
+  .description('Run plan/apply lifecycle in a GitLab MR pipeline (bridge-less mode)')
+  .requiredOption('-e, --env <env>', 'Environment to use')
+  .option('-f, --format <format>', 'Select formatter for the plan', 'default')
+  .option('-p, --project <project>', 'Scope to a single project')
+  .option('--approval-emoji <emoji>', 'Emoji name that constitutes approval', 'thumbsup')
+  .option('--no-deps', 'Ignore dependencies')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ ig ci --env staging
+  $ ig ci --env production --approval-emoji rocket`,
+  )
+  .action(
+    async ({
+      env,
+      format,
+      project,
+      deps,
+      approvalEmoji,
+    }: {
+      env: string
+      format?: string
+      project?: string
+      deps: boolean
+      approvalEmoji?: string
+    }) => {
+      const monorepo = requireMonorepo()
+      env = await resolveEnv(env)
+      const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, false, env)
+      const exitCode = await runGitLabCi({
+        execContext,
+        formatter: getFormatter(format),
+        approvalEmoji,
+      })
+      process.exit(exitCode)
+    },
+  )
+
+program
   .command('import')
   .description('Import an existing cloud resource into infrastructure state')
   .argument('<args...>', 'Arguments to pass to the provider import command')
@@ -426,6 +517,7 @@ Examples:
   $ ig ${execCmd.name} --env production --approve 1
   $ ig ${execCmd.name} --env production --approve 1,2,3
   $ ig ${execCmd.name} --env production --approve all
+  $ ig ${execCmd.name} --env production --approve all --up-to-level 2
   $ ig ${execCmd.name} --env dev --project postgres
   $ ig ${execCmd.name} --env dev --start-with-project postgres --approve all`,
   )
@@ -587,4 +679,7 @@ getPackageJsonVersion()
   })
   .catch(() => {})
 
-program.parse()
+await program.parseAsync().catch((err: unknown) => {
+  if (err instanceof Error) handleError(err)
+  else process.exit(1)
+})

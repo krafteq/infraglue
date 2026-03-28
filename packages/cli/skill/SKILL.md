@@ -65,11 +65,12 @@ output: # optional: expose workspace outputs at monorepo level
 
 ### Fields
 
-| Field       | Type                     | Required | Description                                                                                        |
-| ----------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------- |
-| `workspace` | `string[]`               | Yes      | Glob patterns to discover workspace directories (must match at least one)                          |
-| `vars`      | `Record<string, string>` | No       | Shared variables passed to all workspaces (lowest priority, overridden by env vars and injections) |
-| `output`    | `Record<string, string>` | No       | Map of exported names to `'./workspace:output_key'` references                                     |
+| Field       | Type                     | Required | Description                                                                                         |
+| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------- |
+| `workspace` | `string[]`               | Yes      | Glob patterns to discover workspace directories (must match at least one)                           |
+| `vars`      | `Record<string, string>` | No       | Shared variables passed to all workspaces (lowest priority, overridden by env vars and injections)  |
+| `output`    | `Record<string, string>` | No       | Map of exported names to `'./workspace:output_key'` references                                      |
+| `vault`     | `VaultConfig`            | No       | HashiCorp Vault connection settings (see [Vault Secret Interpolation](#vault-secret-interpolation)) |
 
 ## Workspace-Level ig.yaml
 
@@ -176,6 +177,52 @@ envs:
 - A missing (unset) environment variable throws an error; empty string is valid
 - Structural fields (`workspace`, `injection`, `depends_on`, `alias`, `provider`, `output`) are NOT interpolated
 
+### Vault Secret Interpolation
+
+String values in `vars`, `backend_config`, `backend_type`, `backend_file`, and `var_files` support `${vault:path#field}` syntax, which fetches secrets from HashiCorp Vault's KV v2 engine at config parse time.
+
+```yaml
+# root ig.yaml
+vault:
+  address: https://vault.example.com # optional, falls back to VAULT_ADDR env var
+  role: infra-role # optional, for JWT auth — falls back to VAULT_ROLE env var
+
+workspace:
+  - './*'
+
+# workspace ig.yaml
+envs:
+  prod:
+    backend_type: azurerm
+    backend_config:
+      storage_account_name: ${vault:secret/data/azure#storage_account}
+      access_key: ${vault:secret/data/azure#access_key}
+    vars:
+      db_password: ${vault:secret/data/db/prod#password}
+      PULUMI_CONFIG_PASSPHRASE: ${vault:secret/data/pulumi#passphrase}
+```
+
+- `${vault:path#field}` fetches field `field` from the KV v2 secret at `path`
+- The path must include the KV v2 `secret/data/` prefix (e.g., `secret/data/myapp`)
+- Multiple references to the same path fetch the secret once (cached per run)
+- `$${vault:path#field}` escapes to the literal string `${vault:path#field}` (no resolution)
+- Vault references and `${ENV_VAR}` references can be mixed in the same config
+
+**Authentication** — ig resolves a Vault token using this priority:
+
+1. `VAULT_TOKEN` env var (set explicitly or by `vault login`)
+2. `~/.vault-token` file (written by `vault login`)
+3. JWT auth — if `VAULT_ID_TOKEN` is set, exchanges it for a token via `POST /v1/auth/{mount}/login`
+
+For local development, run `vault login` once. In CI (e.g., GitLab), the pipeline provides `VAULT_ID_TOKEN` automatically.
+
+**Vault config fields:**
+
+| Field     | Type     | Description                                           |
+| --------- | -------- | ----------------------------------------------------- |
+| `address` | `string` | Vault server URL. Falls back to `VAULT_ADDR` env var  |
+| `role`    | `string` | Role for JWT auth. Falls back to `VAULT_ROLE` env var |
+
 ### Environment Variable Files
 
 ig loads `.env` files from the `.ig/` directory before config interpolation, so values are available for `${VAR}` substitution in ig.yaml and for provider subprocesses (Terraform/Pulumi).
@@ -251,6 +298,10 @@ ig apply --env dev --no-deps          # apply without running dependencies
 ig apply --env dev --start-with-project postgres  # skip upstream levels, use cached outputs
 ig destroy --env staging              # destroy all workspaces
 
+# GitLab CI (bridge-less mode)
+ig ci --env staging                   # full lifecycle: read approvals, apply, plan, post comments
+ig ci --env prod --approval-emoji rocket  # use custom emoji for approval
+
 # Drift detection and reconciliation
 ig drift --env staging                # detect drift across all workspaces (exit code 2 = drift)
 ig drift --env prod --json            # output structured DriftReport as JSON
@@ -296,6 +347,27 @@ ig install-skill --force              # overwrite existing
 
 Level numbers are 1-indexed. Without `--approve`, the command waits for interactive confirmation. Pre-approved levels skip the plan step entirely and apply directly (no `terraform plan`/`pulumi preview`), which is faster — especially for Pulumi where preview and up both run the program.
 
+**`--up-to-level <N>`** (for `ig apply` and `ig destroy`):
+
+Stop execution after level N (1-indexed). Combine with `--approve all` to auto-apply up to a specific level:
+
+```bash
+ig apply --env prod --approve all --up-to-level 2   # apply levels 1 and 2, skip the rest
+```
+
+This is used by the GitLab bridge to apply only the approved level.
+
+**Environment variables for bridge-triggered pipelines:**
+
+When the InfraGlue Bridge triggers a pipeline, it sets `IG_ACTION=apply` and `IG_APPROVED_LEVEL=N`. The CLI auto-detects these and defaults to `--approve all --up-to-level N` (explicit CLI flags take precedence).
+
+| Variable            | Description                                 |
+| ------------------- | ------------------------------------------- |
+| `IG_ACTION`         | Set to `apply` by the bridge                |
+| `IG_APPROVED_LEVEL` | Level number approved via MR emoji reaction |
+| `IG_PLAN_ID`        | Plan ID for correlation                     |
+| `IG_MR_IID`         | Merge request IID for correlation           |
+
 **`--start-with-project <name>`** (for `ig apply`, `ig destroy`, `ig plan`):
 
 Skip all execution levels before the level containing the named project. Cached outputs from `.ig/state.json` are used for skipped workspaces instead of running provider commands. Useful for resuming partially-applied monorepos or iterating on a downstream workspace without re-running upstream.
@@ -336,6 +408,41 @@ During `ig apply` and `ig destroy`, ig streams real-time progress from Terraform
 [postgres] error: aws_rds.main - DBInstanceAlreadyExists
 ```
 
+### GitLab MR Approval Workflow
+
+Two modes are available for GitLab MR-based approval:
+
+**Bridge-less mode (`ig ci`)** — single pipeline job, no external service:
+
+```yaml
+# .gitlab-ci.yml
+infraglue:
+  script: ig ci --env $CI_ENVIRONMENT_NAME
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+```
+
+On each pipeline run, `ig ci` reads MR comments + emoji reactions and determines what to do:
+
+1. **No comments** — plans forward, posts one comment per level that has changes (or a "no changes" comment if everything is up to date)
+2. **Comments exist, none approved** — exits (waiting for approvals)
+3. **Some levels approved (thumbsup)** — applies approved levels, plans remaining, posts new comments (or "all applied" comment if no remaining changes)
+4. **Code changed since last plan** — marks old comments as stale, re-plans from scratch
+
+After approving a level (thumbsup on the comment), manually re-trigger the pipeline (`/run_pipeline` or "Run pipeline" button in MR). Levels with no changes are auto-skipped.
+
+**Bridge mode (`ig plan` + `@krafteq/infraglue-bridge`)** — webhook-driven, instant reaction:
+
+```text
+MR push → ig plan → posts comment per level
+User 👍 comment → bridge webhook → triggers pipeline
+ig apply (auto: --approve all --up-to-level N) → applies → re-plans → posts new comments
+```
+
+`ig plan` auto-detects GitLab MR pipelines and posts comments. The bridge service receives emoji webhooks and instantly triggers apply pipelines via the GitLab trigger API.
+
+Both modes use the same comment format with hidden `<!-- ig-meta:{...} -->` tags.
+
 ### Global Options
 
 | Option                  | Description                                      |
@@ -351,6 +458,14 @@ During `ig apply` and `ig destroy`, ig streams real-time progress from Terraform
 | -------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `IG_DEBUG` / `IG_VERBOSE`  | `1`         | Enable verbose/debug output (same as `--verbose` flag)                                                                                                    |
 | `IG_DISABLE_STATE_OUTPUTS` | `1`, `true` | Skip caching workspace outputs in `.ig/state.json`. Outputs are always fetched live from the provider. Use when you don't want secrets persisted to disk. |
+| `VAULT_ADDR`               | URL         | Vault server address (fallback when `vault.address` is not set in ig.yaml)                                                                                |
+| `VAULT_SERVER_URL`         | URL         | GitLab CI alias for `VAULT_ADDR` (used as fallback)                                                                                                       |
+| `VAULT_TOKEN`              | string      | Vault token for authentication (highest priority auth method)                                                                                             |
+| `VAULT_ID_TOKEN`           | JWT string  | JWT token for Vault JWT auth (e.g., from GitLab CI `id_tokens`)                                                                                           |
+| `VAULT_ROLE`               | string      | Vault role for JWT auth (fallback when `vault.role` is not set in ig.yaml)                                                                                |
+| `VAULT_AUTH_ROLE`          | string      | GitLab CI alias for `VAULT_ROLE` (used as fallback)                                                                                                       |
+| `VAULT_AUTH_MOUNT`         | string      | Auth mount path for JWT auth (defaults to `jwt`)                                                                                                          |
+| `VAULT_AUTH_PATH`          | string      | GitLab CI alias for `VAULT_AUTH_MOUNT` (used as fallback)                                                                                                 |
 
 ### Drift Detection
 
@@ -424,14 +539,19 @@ When `ig plan` or `ig apply` detects no resource changes in a workspace, it comp
 
 ## Troubleshooting
 
-| Error                                    | Cause                                                | Fix                                                                                                                            |
-| ---------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `Monorepo not found in <dir>`            | No `ig.yaml` with `workspace` field found            | Ensure root `ig.yaml` exists with `workspace` globs                                                                            |
-| `No environment selected`                | No env stored and no `--env` flag                    | Run `ig env select <env>` or pass `--env`                                                                                      |
-| `Single workspace is required`           | `provider` command run from monorepo root            | `cd` into a workspace dir or pass `--project`                                                                                  |
-| Workspace not discovered                 | Directory doesn't match any `workspace` glob         | Check glob patterns in root `ig.yaml`                                                                                          |
-| Provider not detected                    | No `.tf` or `Pulumi.yaml` files in workspace         | Add IaC files or set `provider` explicitly in workspace `ig.yaml`                                                              |
-| `Environment variable 'X' is not set`    | `${X}` used in config but `X` is not in env          | Set the env var or use `$${X}` to escape as literal                                                                            |
-| Provider state locked after failed apply | A previous `ig apply` or `ig destroy` failed mid-run | Run `ig provider force-unlock <lock-id>` in each failed workspace, or `pulumi cancel` for Pulumi                               |
-| Destroy fails with missing upstream      | Upstream workspace already destroyed in a prior run  | ig `>=0.3.0` handles this automatically with placeholder inputs. On older versions, re-apply upstream first or use `--no-deps` |
-| Corrupted state / lost outputs           | Multiple `ig` processes ran concurrently             | Never run ig commands in parallel — ig uses a process-local mutex on `.ig/state.json`. Wait for each command to finish         |
+| Error                                    | Cause                                                   | Fix                                                                                                                            |
+| ---------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `Monorepo not found in <dir>`            | No `ig.yaml` with `workspace` field found               | Ensure root `ig.yaml` exists with `workspace` globs                                                                            |
+| `No environment selected`                | No env stored and no `--env` flag                       | Run `ig env select <env>` or pass `--env`                                                                                      |
+| `Single workspace is required`           | `provider` command run from monorepo root               | `cd` into a workspace dir or pass `--project`                                                                                  |
+| Workspace not discovered                 | Directory doesn't match any `workspace` glob            | Check glob patterns in root `ig.yaml`                                                                                          |
+| Provider not detected                    | No `.tf` or `Pulumi.yaml` files in workspace            | Add IaC files or set `provider` explicitly in workspace `ig.yaml`                                                              |
+| `Environment variable 'X' is not set`    | `${X}` used in config but `X` is not in env             | Set the env var or use `$${X}` to escape as literal                                                                            |
+| Provider state locked after failed apply | A previous `ig apply` or `ig destroy` failed mid-run    | Run `ig provider force-unlock <lock-id>` in each failed workspace, or `pulumi cancel` for Pulumi                               |
+| Destroy fails with missing upstream      | Upstream workspace already destroyed in a prior run     | ig `>=0.3.0` handles this automatically with placeholder inputs. On older versions, re-apply upstream first or use `--no-deps` |
+| Corrupted state / lost outputs           | Multiple `ig` processes ran concurrently                | Never run ig commands in parallel — ig uses a process-local mutex on `.ig/state.json`. Wait for each command to finish         |
+| `Vault authentication failed: no token`  | No `VAULT_TOKEN`, `~/.vault-token`, or `VAULT_ID_TOKEN` | Run `vault login` locally, or set `VAULT_TOKEN` / `VAULT_ID_TOKEN` in CI                                                       |
+| `Vault access denied for path '...'`     | Token lacks permission for the secret path              | Check Vault policies for the token/role                                                                                        |
+| `Vault secret not found at '...'`        | Secret path doesn't exist or wrong KV v2 path           | Ensure the path includes `secret/data/` prefix (KV v2). Verify with `vault kv get <path>`                                      |
+| `no vault configuration provided`        | `${vault:...}` used but no Vault address configured     | Set `VAULT_ADDR` env var or add `vault.address` to root ig.yaml                                                                |
+| `Vault JWT auth requires a role`         | JWT auth attempted without a role                       | Set `vault.role` in ig.yaml or `VAULT_ROLE` env var                                                                            |

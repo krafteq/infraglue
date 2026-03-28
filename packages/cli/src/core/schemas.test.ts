@@ -125,6 +125,35 @@ describe('monorepoConfigSchema', () => {
     const result = monorepoConfigSchema.parse({ workspace: ['./*'] })
     expect(result.vars).toBeUndefined()
   })
+
+  it('should accept config with vault block', () => {
+    const result = monorepoConfigSchema.parse({
+      workspace: ['./*'],
+      vault: { address: 'https://vault.example.com', role: 'infra-role' },
+    })
+    expect(result.vault).toEqual({ address: 'https://vault.example.com', role: 'infra-role' })
+  })
+
+  it('should accept config with partial vault block', () => {
+    const result = monorepoConfigSchema.parse({
+      workspace: ['./*'],
+      vault: { address: 'https://vault.example.com' },
+    })
+    expect(result.vault).toEqual({ address: 'https://vault.example.com' })
+  })
+
+  it('should accept config without vault block', () => {
+    const result = monorepoConfigSchema.parse({ workspace: ['./*'] })
+    expect(result.vault).toBeUndefined()
+  })
+
+  it('should accept empty vault block', () => {
+    const result = monorepoConfigSchema.parse({
+      workspace: ['./*'],
+      vault: {},
+    })
+    expect(result.vault).toEqual({})
+  })
 })
 
 describe('formatZodError', () => {
