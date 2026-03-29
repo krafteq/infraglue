@@ -1,5 +1,11 @@
 # @krafteq/infraglue
 
+## 0.6.1
+
+### Patch Changes
+
+- 17cbbc7: Fix crash when Pulumi emits null JSON lines in event log, and fix GitLab CI stale markers accumulating on repeated runs
+
 ## 0.6.0
 
 ### Minor Changes
