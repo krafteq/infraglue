@@ -340,28 +340,37 @@ class PulumiProvider implements IProvider {
   }
 
   private async execCommand(command: string, configuration: ProviderConfig, env: string): Promise<string> {
-    try {
-      logger.debug(`[pulumi] exec: ${command}\n  cwd: ${configuration.rootPath}`)
-      const { stdout, stderr } = await execAsync(command, this.getDefaultExecOptions(configuration, env))
-      if (stderr && stderr.trim()) {
-        logger.debug(`[pulumi] stderr:\n${stderr}`)
-      }
-      if (stdout && stdout.trim()) {
-        logger.debug(`[pulumi] stdout (raw):\n${stdout}`)
-      }
-      return stdout
-    } catch (error) {
-      if (error instanceof Error) {
-        const err = error as Error & { code?: number; stderr?: string; stdout?: string }
-        logger.debug(
-          `[pulumi] exec failed: ${command}\n  cwd: ${configuration.rootPath}\n  code: ${err.code}\n  stderr:\n${err.stderr}\n  stdout (raw):\n${err.stdout}`,
-        )
-        const diagnostics = extractPulumiDiagnostics(err.stdout ?? '', err.stderr ?? '')
-        const message = formatProviderErrorMessage('Pulumi', configuration.alias, diagnostics, command)
-        throw new ProviderError(message, 'pulumi', configuration.alias, { diagnostics, command })
-      }
-      throw error
+    const options = this.getDefaultExecOptions(configuration, env)
+    logger.debug(`[pulumi] exec: ${command}\n  cwd: ${configuration.rootPath}`)
+
+    const stderrLines: string[] = []
+    const result = await spawnWithLineStream(command, {
+      cwd: options.cwd as string,
+      env: options.env as NodeJS.ProcessEnv | undefined,
+      onStdoutLine: () => {},
+      onStderrLine: (line) => {
+        stderrLines.push(line)
+      },
+    })
+
+    const stderr = stderrLines.join('\n')
+    if (stderr.trim()) {
+      logger.debug(`[pulumi] stderr:\n${stderr}`)
     }
+    if (result.stdout && result.stdout.trim()) {
+      logger.debug(`[pulumi] stdout (raw):\n${result.stdout}`)
+    }
+
+    if (result.exitCode !== 0) {
+      logger.debug(
+        `[pulumi] exec failed: ${command}\n  cwd: ${configuration.rootPath}\n  code: ${result.exitCode}\n  stderr:\n${stderr}\n  stdout (raw):\n${result.stdout}`,
+      )
+      const diagnostics = extractPulumiDiagnostics(result.stdout, stderr)
+      const message = formatProviderErrorMessage('Pulumi', configuration.alias, diagnostics, command)
+      throw new ProviderError(message, 'pulumi', configuration.alias, { diagnostics, command })
+    }
+
+    return result.stdout
   }
 }
 
