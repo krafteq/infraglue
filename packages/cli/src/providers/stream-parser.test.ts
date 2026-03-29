@@ -88,6 +88,11 @@ describe('parseTerraformStreamLine', () => {
     const event = parseTerraformStreamLine('')
     expect(event).toBeNull()
   })
+
+  it('returns null for JSON null literal', () => {
+    const event = parseTerraformStreamLine('null')
+    expect(event).toBeNull()
+  })
 })
 
 describe('parsePulumiStreamLine', () => {
@@ -148,6 +153,11 @@ describe('parsePulumiStreamLine', () => {
 
   it('returns null for malformed JSON', () => {
     const event = parsePulumiStreamLine('not json')
+    expect(event).toBeNull()
+  })
+
+  it('returns null for JSON null literal', () => {
+    const event = parsePulumiStreamLine('null')
     expect(event).toBeNull()
   })
 })

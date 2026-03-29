@@ -91,6 +91,15 @@ describe('markCommentAsStale', () => {
     const result = markCommentAsStale(body)
     expect(result).toBe('## Some other comment')
   })
+
+  it('is idempotent — does not accumulate stale markers on repeated calls', () => {
+    const body = '## InfraGlue Plan — Level 1/1\nSome content'
+    const once = markCommentAsStale(body)
+    const twice = markCommentAsStale(once)
+    const thrice = markCommentAsStale(twice)
+    expect(twice).toBe(once)
+    expect(thrice).toBe(once)
+  })
 })
 
 describe('determineContiguousApproved', () => {
