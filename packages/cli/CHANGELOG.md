@@ -1,5 +1,11 @@
 # @krafteq/infraglue
 
+## 0.6.2
+
+### Patch Changes
+
+- e410fbd: fix: replace exec() with streaming spawn in provider execCommand to eliminate maxBuffer crashes on large Pulumi/Terraform output
+
 ## 0.6.1
 
 ### Patch Changes
