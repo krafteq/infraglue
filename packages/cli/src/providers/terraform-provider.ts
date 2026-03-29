@@ -368,30 +368,35 @@ class TerraformProvider implements IProvider {
   }
 
   private async execCommand(command: string, configuration: ProviderConfig): Promise<string> {
-    try {
-      logger.debug(`[terraform] exec: ${command}\n  cwd: ${configuration.rootPath}`)
-      const { stdout, stderr } = await execAsync(command, {
-        cwd: configuration.rootPath,
-      })
-      if (stderr && stderr.trim()) {
-        logger.debug(`[terraform] stderr:\n${stderr}`)
-      }
-      if (stdout && stdout.trim()) {
-        logger.debug(`[terraform] stdout (raw):\n${stdout}`)
-      }
-      return stdout
-    } catch (error) {
-      if (error instanceof Error) {
-        const err = error as Error & { code?: number; stderr?: string; stdout?: string }
-        logger.debug(
-          `[terraform] exec failed: ${command}\n  cwd: ${configuration.rootPath}\n  code: ${err.code}\n  stderr:\n${err.stderr}\n  stdout (raw):\n${err.stdout}`,
-        )
-        const diagnostics = extractTerraformDiagnostics(err.stdout ?? '', err.stderr ?? '')
-        const message = formatProviderErrorMessage('Terraform', configuration.alias, diagnostics, command)
-        throw new ProviderError(message, 'terraform', configuration.alias, { diagnostics, command })
-      }
-      throw error
+    logger.debug(`[terraform] exec: ${command}\n  cwd: ${configuration.rootPath}`)
+
+    const stderrLines: string[] = []
+    const result = await spawnWithLineStream(command, {
+      cwd: configuration.rootPath,
+      onStdoutLine: () => {},
+      onStderrLine: (line) => {
+        stderrLines.push(line)
+      },
+    })
+
+    const stderr = stderrLines.join('\n')
+    if (stderr.trim()) {
+      logger.debug(`[terraform] stderr:\n${stderr}`)
     }
+    if (result.stdout && result.stdout.trim()) {
+      logger.debug(`[terraform] stdout (raw):\n${result.stdout}`)
+    }
+
+    if (result.exitCode !== 0) {
+      logger.debug(
+        `[terraform] exec failed: ${command}\n  cwd: ${configuration.rootPath}\n  code: ${result.exitCode}\n  stderr:\n${stderr}\n  stdout (raw):\n${result.stdout}`,
+      )
+      const diagnostics = extractTerraformDiagnostics(result.stdout, stderr)
+      const message = formatProviderErrorMessage('Terraform', configuration.alias, diagnostics, command)
+      throw new ProviderError(message, 'terraform', configuration.alias, { diagnostics, command })
+    }
+
+    return result.stdout
   }
 }
 
