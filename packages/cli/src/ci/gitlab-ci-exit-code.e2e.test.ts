@@ -109,14 +109,14 @@ describe('ig ci exit code (e2e)', () => {
       expect(result.exitCode).toBe(2)
     }, 30_000)
 
-    it('should exit 2 (UserError) when not in MR pipeline', async () => {
+    it('should exit 1 (UserError) when not in MR pipeline', async () => {
       const igArgs = ['-d', FIXTURE_DIR, 'ci', '--env', 'dev']
       const result = await runIg(cmd, makeArgs(igArgs), {})
 
       console.log(`[${label}] not-in-pipeline status=${result.exitCode}`)
 
       expect(result.signal).toBeNull()
-      expect(result.exitCode).toBe(2)
+      expect(result.exitCode).toBe(1)
     }, 30_000)
   })
 })

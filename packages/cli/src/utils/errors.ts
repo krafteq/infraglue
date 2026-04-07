@@ -12,7 +12,7 @@ export class IgError extends Error {
 
 export class UserError extends IgError {
   constructor(message: string) {
-    super(message, 2)
+    super(message, 1)
     this.name = 'UserError'
   }
 }
