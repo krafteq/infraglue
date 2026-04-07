@@ -1,4 +1,5 @@
 import type { ProviderPlan, ResourceChange, Diagnostic, ChangeSummary, Output } from '../providers/provider-plan.js'
+import { diffAttributes } from '../core/plan-diff.js'
 import pc from 'picocolors'
 
 // TODO: refactor this.
@@ -68,7 +69,7 @@ export class DefaultFormatter {
 
     const resources = this.formatResources(plan.resourceChanges)
     const outputs = this.formatOutputs(plan.outputs)
-    const table = this.buildTable(resources)
+    const table = this.buildTableWithPropertyDiffs(resources, plan.resourceChanges)
     const diagnostics =
       includeDiagnostics && effectiveExitCode !== 0 ? `\n\nDiagnostics:\n${this.formatErrors(plan.diagnostics)}` : ''
 
@@ -246,6 +247,44 @@ export class DefaultFormatter {
     )
 
     return [headerRow, ...rows].join('\n')
+  }
+
+  /**
+   * Build a table with property diff lines interleaved after update/replace resources
+   */
+  private static buildTableWithPropertyDiffs(
+    data: Array<{ op: string; type: string; name: string; plan: string; info: string }>,
+    changes: ResourceChange[],
+  ): string {
+    const table = this.buildTable(data)
+    const tableLines = table.split('\n')
+    const result: string[] = [tableLines[0]] // header
+
+    for (let i = 0; i < changes.length; i++) {
+      result.push(tableLines[i + 1])
+      result.push(...this.formatPropertyDiffLines(changes[i]))
+    }
+
+    return result.join('\n')
+  }
+
+  /**
+   * Format property-level diff lines for a resource change
+   */
+  private static formatPropertyDiffLines(change: ResourceChange): string[] {
+    if (!change.actions.some((a) => a === 'update' || a === 'replace')) return []
+    if (!change.before || !change.after) return []
+
+    const diffs = diffAttributes(change.before, change.after)
+    if (diffs.length === 0) return []
+
+    return diffs.map((diff) => {
+      const isAdded = diff.before === undefined
+      const isRemoved = diff.after === undefined
+      const symbol = isAdded ? '+' : isRemoved ? '-' : '~'
+      const color = isAdded ? pc.green : isRemoved ? pc.red : pc.yellow
+      return `      ${color(symbol + ' ' + diff.key)}`
+    })
   }
 
   /**

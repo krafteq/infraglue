@@ -82,6 +82,96 @@ describe('DefaultFormatter', () => {
 
       expect(output).toBe('')
     })
+
+    it('should show changed property names under update resources', () => {
+      const plan = createProviderPlan({
+        changeSummary: { add: 0, change: 1, remove: 0, replace: 0, outputUpdates: 0 },
+        resourceChanges: [
+          createResourceChange({
+            actions: ['update'],
+            before: { ami: 'ami-old', tags: { env: 'dev' }, name: 'web' },
+            after: { ami: 'ami-new', tags: { env: 'prod' }, name: 'web' },
+          }),
+        ],
+      })
+
+      const output = DefaultFormatter.format(plan)
+
+      expect(output).toContain('~ ami')
+      expect(output).toContain('~ tags')
+      expect(output).not.toContain('~ name')
+    })
+
+    it('should show added and removed properties under update resources', () => {
+      const plan = createProviderPlan({
+        changeSummary: { add: 0, change: 1, remove: 0, replace: 0, outputUpdates: 0 },
+        resourceChanges: [
+          createResourceChange({
+            actions: ['update'],
+            before: { old_field: 'val' },
+            after: { new_field: 'val' },
+          }),
+        ],
+      })
+
+      const output = DefaultFormatter.format(plan)
+
+      expect(output).toContain('- old_field')
+      expect(output).toContain('+ new_field')
+    })
+
+    it('should show property diffs for replace resources', () => {
+      const plan = createProviderPlan({
+        changeSummary: { add: 0, change: 0, remove: 0, replace: 1, outputUpdates: 0 },
+        resourceChanges: [
+          createResourceChange({
+            actions: ['replace'],
+            before: { ami: 'ami-old' },
+            after: { ami: 'ami-new' },
+          }),
+        ],
+      })
+
+      const output = DefaultFormatter.format(plan)
+
+      expect(output).toContain('~ ami')
+    })
+
+    it('should not show property diffs for create resources', () => {
+      const plan = createProviderPlan({
+        changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 },
+        resourceChanges: [
+          createResourceChange({
+            actions: ['create'],
+            before: null,
+            after: { ami: 'ami-new', tags: {} },
+          }),
+        ],
+      })
+
+      const output = DefaultFormatter.format(plan)
+
+      expect(output).not.toContain('~ ami')
+      expect(output).not.toContain('+ ami')
+    })
+
+    it('should not show property diffs for delete resources', () => {
+      const plan = createProviderPlan({
+        changeSummary: { add: 0, change: 0, remove: 1, replace: 0, outputUpdates: 0 },
+        resourceChanges: [
+          createResourceChange({
+            actions: ['delete'],
+            before: { ami: 'ami-old' },
+            after: null,
+          }),
+        ],
+      })
+
+      const output = DefaultFormatter.format(plan)
+
+      expect(output).not.toContain('~ ami')
+      expect(output).not.toContain('- ami')
+    })
   })
 
   describe('formatForMarkdown()', () => {
