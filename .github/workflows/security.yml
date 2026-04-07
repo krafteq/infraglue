@@ -95,16 +95,36 @@ jobs:
   # -------------------------------------------------------
   # LAYER 2c — Secrets: Gitleaks (extra safety net)
   # -------------------------------------------------------
-  gitleaks:
-    name: Gitleaks secrets scan
+  # gitleaks:
+  #   name: Gitleaks secrets scan
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0       # Full history — catches secrets in old commits
+
+  #     - name: Run Gitleaks
+  #       uses: gitleaks/gitleaks-action@v2
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+  # -------------------------------------------------------
+  # LAYER 2c — Secrets: truffleHog (extra safety net)
+  # -------------------------------------------------------
+  trufflehog:
+    name: TruffleHog secrets scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0       # Full history — catches secrets in old commits
+          fetch-depth: 0
 
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          extra_args: --only-verified
