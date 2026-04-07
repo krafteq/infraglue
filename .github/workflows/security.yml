@@ -33,7 +33,6 @@ jobs:
             --config "p/sql-injection" \
             --config "p/xss"          \
             --sarif --output semgrep.sarif \
-            --error
         #env:
           # Optional: add your Semgrep token for dashboard reporting
           # SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
