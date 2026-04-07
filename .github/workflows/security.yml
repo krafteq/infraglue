@@ -1,0 +1,111 @@
+name: Security Scan
+
+on:
+  push:
+    branches: ["main", "master", "develop","SecuritySetup"]
+  pull_request:
+    branches: ["main", "master", "develop","SecuritySetup"]
+  schedule:
+    # Runs every day at 2am UTC — catches new CVEs between pushes
+    - cron: "0 2 * * *"
+
+jobs:
+  # -------------------------------------------------------
+  # LAYER 2a — SAST: Semgrep (JS/TS + Python)
+  # -------------------------------------------------------
+  semgrep:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config "p/javascript"   \
+            --config "p/typescript"   \
+            --config "p/python"       \
+            --config "p/owasp-top-ten" \
+            --config "p/secrets"      \
+            --config "p/sql-injection" \
+            --config "p/xss"          \
+            --sarif --output semgrep.sarif \
+            --error
+        env:
+          # Optional: add your Semgrep token for dashboard reporting
+          # SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Upload Semgrep SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  # -------------------------------------------------------
+  # LAYER 2b — SCA + IaC: Trivy (deps + HCL/Terraform)
+  # -------------------------------------------------------
+  trivy:
+    name: Trivy SCA + IaC
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # --- Dependency scan (package.json, requirements.txt, etc.) ---
+      - name: Trivy — dependency vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          scanners: "vuln"
+          severity: "HIGH,CRITICAL"
+          format: "sarif"
+          output: "trivy-deps.sarif"
+          exit-code: "1"         # Fails the pipeline on HIGH/CRITICAL
+
+      - name: Upload Trivy dependency SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-deps.sarif
+          category: trivy-deps
+
+      # --- IaC scan (HCL / Terraform files) ---
+      - name: Trivy — IaC / HCL scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          scanners: "misconfig"
+          severity: "HIGH,CRITICAL"
+          format: "sarif"
+          output: "trivy-iac.sarif"
+          exit-code: "1"
+
+      - name: Upload Trivy IaC SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-iac.sarif
+          category: trivy-iac
+
+  # -------------------------------------------------------
+  # LAYER 2c — Secrets: Gitleaks (extra safety net)
+  # -------------------------------------------------------
+  gitleaks:
+    name: Gitleaks secrets scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # Full history — catches secrets in old commits
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

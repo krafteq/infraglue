@@ -1,0 +1,46 @@
+rules: []
+
+# This file controls Semgrep behaviour in your repo.
+# The actual rulesets are declared in the GitHub Actions workflow.
+# Use this file to ignore false positives or add custom rules.
+
+# -----------------------------------------------------------
+# IGNORING FALSE POSITIVES
+# Add paths or rule IDs to suppress known-safe findings.
+# -----------------------------------------------------------
+# Example — ignore a specific rule across the whole repo:
+# - id: javascript.lang.security.audit.prototype-pollution.prototype-pollution
+#   paths:
+#     exclude:
+#       - "tests/**"
+#       - "**/*.test.ts"
+
+# -----------------------------------------------------------
+# CUSTOM RULES (optional)
+# Add org-specific patterns below. Example: detect hardcoded
+# staging URLs that should never reach production.
+# -----------------------------------------------------------
+# - id: no-hardcoded-staging-url
+#   patterns:
+#     - pattern: |
+#         "$URL"
+#   metavariable-regex:
+#     metavariable: $URL
+#     regex: 'https?://staging\.'
+#   message: Hardcoded staging URL detected — use environment variables.
+#   languages: [javascript, typescript, python]
+#   severity: WARNING
+
+# -----------------------------------------------------------
+# PATHS TO ALWAYS IGNORE
+# -----------------------------------------------------------
+paths:
+  exclude:
+    - "node_modules/**"
+    - ".venv/**"
+    - "venv/**"
+    - "dist/**"
+    - "build/**"
+    - "**/*.min.js"
+    - "**/__pycache__/**"
+    - ".terraform/**"
