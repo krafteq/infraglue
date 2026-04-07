@@ -7,6 +7,7 @@ export class WorkspacePlanState {
   public readonly name: string
   public status: PlanStatus = 'pending'
   public readonly startTime: number
+  private endTime: number | null = null
   public changeSummary: ChangeSummary | null = null
   public error: string | null = null
 
@@ -22,19 +23,22 @@ export class WorkspacePlanState {
   markDone(summary: ChangeSummary): void {
     this.status = 'done'
     this.changeSummary = summary
+    this.endTime = Date.now()
   }
 
   markUpToDate(): void {
     this.status = 'up-to-date'
+    this.endTime = Date.now()
   }
 
   markFailed(error: string): void {
     this.status = 'failed'
     this.error = error
+    this.endTime = Date.now()
   }
 
   get elapsedSeconds(): number {
-    return Math.round((Date.now() - this.startTime) / 1000)
+    return Math.round(((this.endTime ?? Date.now()) - this.startTime) / 1000)
   }
 }
 
@@ -59,6 +63,7 @@ export class WorkspaceApplyState {
   public removeCount = 0
   public readonly diagnostics: Array<{ severity: string; summary: string; address: string | null }> = []
   public readonly startTime: number
+  private endTime: number | null = null
   public error: string | null = null
 
   constructor(name: string) {
@@ -137,15 +142,17 @@ export class WorkspaceApplyState {
 
   markComplete(): void {
     this.status = 'complete'
+    this.endTime = Date.now()
   }
 
   markFailed(error: string): void {
     this.status = 'failed'
     this.error = error
+    this.endTime = Date.now()
   }
 
   get elapsedSeconds(): number {
-    return Math.round((Date.now() - this.startTime) / 1000)
+    return Math.round(((this.endTime ?? Date.now()) - this.startTime) / 1000)
   }
 
   get currentResource(): ResourceState | undefined {
