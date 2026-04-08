@@ -1,5 +1,17 @@
 # @krafteq/infraglue
 
+## 0.7.0
+
+### Minor Changes
+
+- 06e298e: Reserve exit code 2 exclusively for "changes detected" in plan/apply/ci commands. UserError and ConfigError now exit with code 1 instead of 2, preventing real errors from being misinterpreted as "has changes" in CI/CD pipelines.
+- 06e298e: Show changed property names under update/replace resources in plan output. For each resource being updated or replaced, the formatter now displays which properties are added (+), removed (-), or changed (~) — without needing the --detailed flag.
+
+### Patch Changes
+
+- 06e298e: Fix workspace timer not stopping after plan/apply completes
+- 06e298e: Fix unsettled top-level await warning on Node.js 22+ by replacing process.exit() with process.exitCode
+
 ## 0.6.2
 
 ### Patch Changes
