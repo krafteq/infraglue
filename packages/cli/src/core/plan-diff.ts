@@ -41,7 +41,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return false
 }
 
-function diffAttributes(before: Record<string, unknown>, after: Record<string, unknown>): AttributeDiff[] {
+export function diffAttributes(before: Record<string, unknown>, after: Record<string, unknown>): AttributeDiff[] {
   const diffs: AttributeDiff[] = []
   const allKeys = new Set([...Object.keys(before), ...Object.keys(after)])
 

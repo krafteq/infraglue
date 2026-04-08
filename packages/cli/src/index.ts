@@ -418,7 +418,7 @@ Examples:
         formatter: getFormatter(format),
         approvalEmoji,
       })
-      process.exit(exitCode)
+      process.exitCode = exitCode
     },
   )
 
@@ -649,12 +649,16 @@ process.on('SIGINT', () => {
 
 process.on('uncaughtException', (err) => {
   handleError(err)
+  // uncaughtException: unsafe to continue, force exit
+  process.exit(process.exitCode ?? 1)
 })
 
 process.on('unhandledRejection', (err) => {
   if (err instanceof Error) {
     handleError(err)
-  } else throw err
+  } else {
+    process.exitCode = 1
+  }
 })
 
 let packageVersion: string | undefined
@@ -665,12 +669,13 @@ function handleError(err: Error) {
     if (isDebug() && err.stack) {
       logger.error(pc.dim(err.stack))
     }
-    process.exit(err.exitCode)
+    process.exitCode = err.exitCode
+    return
   }
 
   const version = packageVersion ?? 'unknown'
   logger.error(pc.red(formatUnexpectedError(err, version)))
-  process.exit(1)
+  process.exitCode = 1
 }
 
 getPackageJsonVersion()
@@ -681,5 +686,5 @@ getPackageJsonVersion()
 
 await program.parseAsync().catch((err: unknown) => {
   if (err instanceof Error) handleError(err)
-  else process.exit(1)
+  else process.exitCode = 1
 })

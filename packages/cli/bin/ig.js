@@ -44,7 +44,10 @@ if (canUseTsNode()) {
   })
   process.exit(result.status ?? 1)
 } else if (existsSync(jsPath)) {
-  await import(pathToFileURL(jsPath))
+  import(pathToFileURL(jsPath)).catch((err) => {
+    console.error(err.message ?? err)
+    process.exitCode = 1
+  })
 } else {
   console.error('Error: Could not find entry point.\n' + `Checked:\n  - ${tsPath}\n  - ${jsPath}`)
   process.exit(1)

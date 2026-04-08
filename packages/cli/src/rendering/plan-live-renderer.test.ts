@@ -25,8 +25,8 @@ describe('formatPlanCompactLine', () => {
 
   it('shows done workspace with change summary', () => {
     const ws = new WorkspacePlanState('postgres')
-    ws.markDone({ add: 2, change: 1, remove: 0, replace: 0, outputUpdates: 0 })
     vi.advanceTimersByTime(5000)
+    ws.markDone({ add: 2, change: 1, remove: 0, replace: 0, outputUpdates: 0 })
 
     const line = formatPlanCompactLine(ws)
     expect(line).toContain('ok')
