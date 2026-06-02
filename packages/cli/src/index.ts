@@ -126,46 +126,33 @@ program
       detailed?: boolean
       startWithProject?: string
     }) => {
-      const monorepo = requireMonorepo()
-      env = await resolveEnv(env)
-      validateStartWithProject(startWithProject, project, deps)
-      const startWithWorkspace = startWithProject ? monorepo.getWorkspace(startWithProject) : undefined
-      const execContext = new ExecutionContext(
-        monorepo,
-        currentWorkspace(project),
-        !deps,
-        false,
-        env,
-        startWithWorkspace,
-      )
+      await runPlanCommand({ format, env, project, deps, detailed: detailed ?? false, startWithProject })
+    },
+  )
 
-      let onLevelPlanned: ((data: LevelPlanReport) => Promise<void>) | undefined
-
-      if (GitLabPipeline.isInPipeline() && GitLabPipeline.getMergeRequestIid()) {
-        const gitlabClient = new GitLabClient()
-        const planId = process.env['CI_PIPELINE_ID'] ?? randomUUID()
-
-        onLevelPlanned = async (data: LevelPlanReport) => {
-          const comment = formatLevelComment({
-            levelNumber: data.levelIndex + 1,
-            levelsCount: data.levelsCount,
-            workspacePlans: data.levelPlans.map((lp) => ({
-              workspaceName: lp.workspace.name,
-              plan: lp.plan,
-            })),
-            planId,
-          })
-          await gitlabClient.addComment(comment)
-          logger.info(`Posted plan comment for Level ${data.levelIndex + 1} to GitLab MR`)
-        }
-      }
-
-      const result = await new MultistageExecutor(execContext).plan({
-        formatter: getFormatter(format),
-        detailed: detailed ?? false,
-        onLevelPlanned,
-      })
-      process.exitCode = result.hasChanges ? 2 : 0
+program
+  .command('diff')
+  .description('Show detailed infrastructure property changes without applying')
+  .option('-f, --format <format>', 'Select formatter for the plan summary', 'default')
+  .option('-p, --project <project>', 'Project to diff')
+  .option('-e, --env <env>', 'Environment to diff')
+  .option('--no-deps', 'Ignore dependencies')
+  .option('--start-with-project <project>', 'Skip levels before this project, use cached outputs')
+  .action(
+    async ({
+      format,
+      env,
+      project,
+      deps,
+      startWithProject,
+    }: {
+      format?: string
+      env: string
+      project?: string
+      deps: boolean
+      startWithProject?: string
+    }) => {
+      await runPlanCommand({ format, env, project, deps, detailed: true, startWithProject })
     },
   )
 
@@ -250,6 +237,56 @@ for (const execCmd of execCommands) {
         })
       },
     )
+}
+
+async function runPlanCommand({
+  format,
+  env,
+  project,
+  deps,
+  detailed,
+  startWithProject,
+}: {
+  format?: string | undefined
+  env?: string | undefined
+  project?: string | undefined
+  deps: boolean
+  detailed: boolean
+  startWithProject?: string | undefined
+}) {
+  const monorepo = requireMonorepo()
+  env = await resolveEnv(env)
+  validateStartWithProject(startWithProject, project, deps)
+  const startWithWorkspace = startWithProject ? monorepo.getWorkspace(startWithProject) : undefined
+  const execContext = new ExecutionContext(monorepo, currentWorkspace(project), !deps, false, env, startWithWorkspace)
+
+  let onLevelPlanned: ((data: LevelPlanReport) => Promise<void>) | undefined
+
+  if (GitLabPipeline.isInPipeline() && GitLabPipeline.getMergeRequestIid()) {
+    const gitlabClient = new GitLabClient()
+    const planId = process.env['CI_PIPELINE_ID'] ?? randomUUID()
+
+    onLevelPlanned = async (data: LevelPlanReport) => {
+      const comment = formatLevelComment({
+        levelNumber: data.levelIndex + 1,
+        levelsCount: data.levelsCount,
+        workspacePlans: data.levelPlans.map((lp) => ({
+          workspaceName: lp.workspace.name,
+          plan: lp.plan,
+        })),
+        planId,
+      })
+      await gitlabClient.addComment(comment)
+      logger.info(`Posted plan comment for Level ${data.levelIndex + 1} to GitLab MR`)
+    }
+  }
+
+  const result = await new MultistageExecutor(execContext).plan({
+    formatter: getFormatter(format),
+    detailed,
+    onLevelPlanned,
+  })
+  process.exitCode = result.hasChanges ? 2 : 0
 }
 
 const configCommand = program.command('config')
@@ -522,6 +559,18 @@ Examples:
   $ ig ${execCmd.name} --env dev --start-with-project postgres --approve all`,
   )
 }
+
+program.commands
+  .find((c) => c.name() === 'diff')
+  ?.addHelpText(
+    'after',
+    `
+Examples:
+  $ ig diff --env staging
+  $ ig diff --env dev --project postgres
+  $ ig diff --env dev --project postgres --no-deps
+  $ ig diff --env dev --start-with-project postgres`,
+  )
 
 program.addHelpText(
   'after',

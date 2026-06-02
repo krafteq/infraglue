@@ -5,7 +5,7 @@ _ig_completions() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  commands="apply destroy plan ci drift refresh import export config env provider completion install-skill"
+  commands="apply destroy plan diff ci drift refresh import export config env provider completion install-skill"
 
   case "\${prev}" in
     ig)
@@ -44,6 +44,7 @@ _ig() {
     'apply:Apply infrastructure changes'
     'destroy:Destroy infrastructure'
     'plan:Preview infrastructure changes without applying'
+    'diff:Show detailed infrastructure property changes without applying'
     'drift:Detect infrastructure drift'
     'refresh:Refresh infrastructure state'
     'import:Import cloud resource into state'
@@ -88,6 +89,14 @@ _ig() {
             '(-p --project)'{-p,--project}'[Project name]:project:' \\
             '--no-deps[Ignore dependencies]' \\
             '--detailed[Show attribute-level diffs]' \\
+            '--start-with-project[Skip levels before project]:project:'
+          ;;
+        diff)
+          _arguments \\
+            '(-e --env)'{-e,--env}'[Environment name]:env:' \\
+            '(-f --format)'{-f,--format}'[Output format]:format:(default)' \\
+            '(-p --project)'{-p,--project}'[Project name]:project:' \\
+            '--no-deps[Ignore dependencies]' \\
             '--start-with-project[Skip levels before project]:project:'
           ;;
         drift)
@@ -146,6 +155,7 @@ export function generateFishCompletion(): string {
 complete -c ig -n '__fish_use_subcommand' -a apply -d 'Apply infrastructure changes'
 complete -c ig -n '__fish_use_subcommand' -a destroy -d 'Destroy infrastructure'
 complete -c ig -n '__fish_use_subcommand' -a plan -d 'Preview infrastructure changes without applying'
+complete -c ig -n '__fish_use_subcommand' -a diff -d 'Show detailed infrastructure property changes without applying'
 complete -c ig -n '__fish_use_subcommand' -a config -d 'Manage configuration'
 complete -c ig -n '__fish_use_subcommand' -a env -d 'Manage environments'
 complete -c ig -n '__fish_use_subcommand' -a provider -d 'Run provider CLI commands'
@@ -174,6 +184,13 @@ complete -c ig -n '__fish_seen_subcommand_from plan' -s p -l project -d 'Project
 complete -c ig -n '__fish_seen_subcommand_from plan' -l no-deps -d 'Ignore dependencies'
 complete -c ig -n '__fish_seen_subcommand_from plan' -l detailed -d 'Show attribute-level diffs'
 complete -c ig -n '__fish_seen_subcommand_from plan' -l start-with-project -d 'Skip levels before project' -r
+
+# diff options
+complete -c ig -n '__fish_seen_subcommand_from diff' -s e -l env -d 'Environment name' -r
+complete -c ig -n '__fish_seen_subcommand_from diff' -s f -l format -d 'Output format' -r
+complete -c ig -n '__fish_seen_subcommand_from diff' -s p -l project -d 'Project name' -r
+complete -c ig -n '__fish_seen_subcommand_from diff' -l no-deps -d 'Ignore dependencies'
+complete -c ig -n '__fish_seen_subcommand_from diff' -l start-with-project -d 'Skip levels before project' -r
 
 # drift options
 complete -c ig -n '__fish_seen_subcommand_from drift' -s e -l env -d 'Environment name' -r

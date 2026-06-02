@@ -123,6 +123,32 @@ describe('parsePulumiPreviewOutput', () => {
     expect(plan.resourceChanges[0].after).toEqual({ name: 'app', image: 'node:20' })
   })
 
+  it('should preserve detailed diff metadata', () => {
+    const plan = parsePulumiPreviewOutput(
+      JSON.stringify({
+        steps: [
+          {
+            op: 'replace',
+            urn: 'urn:pulumi:dev::network::docker:index/container:Container::app-container',
+            oldState: { inputs: { image: 'node:18' } },
+            newState: { inputs: { image: 'node:20' } },
+            detailedDiff: { image: { kind: 'replace' } },
+            inputDiff: true,
+            outputDiff: false,
+          },
+        ],
+      }),
+      'proj',
+    )
+
+    expect(plan.resourceChanges[0].metadata).toMatchObject({
+      detailedDiff: { image: { kind: 'replace' } },
+      inputDiff: true,
+      outputDiff: false,
+      replacePaths: ['image'],
+    })
+  })
+
   it('should handle delete with oldState but no newState', () => {
     const plan = parsePulumiPreviewOutput(PULUMI_PREVIEW_MIXED, 'proj')
     const deleteChange = plan.resourceChanges.find((r) => r.actions[0] === 'delete')
