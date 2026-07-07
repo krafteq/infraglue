@@ -95,6 +95,25 @@ describe('extractPulumiDiagnostics', () => {
     expect(diagnostics[1].severity).toBe('error')
   })
 
+  it('should parse diagnostics from both stdout and stderr', () => {
+    const diagnostics = extractPulumiDiagnostics(PULUMI_ERROR_BLOB, PULUMI_ERROR_STREAMING)
+    expect(diagnostics).toHaveLength(5)
+    expect(diagnostics.map((d) => d.summary)).toContain('Deprecated resource type')
+    expect(diagnostics.map((d) => d.summary)).toContain('failed to create container: image not found')
+  })
+
+  it('should expose plain Pulumi stderr when JSON diagnostics are absent', () => {
+    const diagnostics = extractPulumiDiagnostics(
+      PULUMI_ERROR_NO_DIAGNOSTICS,
+      'error: failed to list stacks: azureblob.OpenBucket: dial tcp: lookup storage.example.net: no such host',
+    )
+
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0].severity).toBe('error')
+    expect(diagnostics[0].summary).toContain('failed to list stacks')
+    expect(diagnostics[0].summary).toContain('azureblob.OpenBucket')
+  })
+
   it('should map Pulumi info#err severity to info', () => {
     const diagnostics = extractPulumiDiagnostics(PULUMI_ERROR_STREAMING, '')
     const infoDiag = diagnostics.find((d) => d.summary === 'Updating resources...')

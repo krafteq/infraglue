@@ -19,7 +19,7 @@ export class EnvManager {
     if (
       currentState.isEnvSelected &&
       currentState.env === env &&
-      !affectedWorkspaces.filter((w) => currentState.workspace(w.name).env !== env)
+      !affectedWorkspaces.some((w) => currentState.workspace(w.name).env !== env)
     ) {
       logger.info(`Environment is already set to ${env}`)
       return

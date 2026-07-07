@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ProviderConfig, ProviderInput } from './provider.js'
+import type { SpawnStreamOptions, SpawnStreamResult } from './spawn-command.js'
+
+const spawnWithLineStream = vi.hoisted(() =>
+  vi.fn<(command: string, options: SpawnStreamOptions) => Promise<SpawnStreamResult>>(),
+)
 
 vi.mock('child_process', () => ({
-  exec: vi.fn((_cmd: string, _opts: unknown, cb: (err: null, result: { stdout: string; stderr: string }) => void) => {
-    cb(null, { stdout: '{}', stderr: '' })
-  }),
+  exec: vi.fn(
+    (_cmd: string, optsOrCb: unknown, cb?: (err: null, result: { stdout: string; stderr: string }) => void) => {
+      const callback = typeof optsOrCb === 'function' ? optsOrCb : cb
+      callback?.(null, { stdout: '{}', stderr: '' })
+    },
+  ),
   execFile: vi.fn(
     (
       _cmd: string,
@@ -16,6 +24,10 @@ vi.mock('child_process', () => ({
     },
   ),
   spawn: vi.fn(),
+}))
+
+vi.mock('./spawn-command.js', () => ({
+  spawnWithLineStream,
 }))
 
 const { exec, execFile } = await import('child_process')
@@ -43,8 +55,15 @@ function getSetAllArgs(): string[][] {
     .map((c) => c[1] as string[])
 }
 
+function getPulumiCommands(): string[] {
+  return spawnWithLineStream.mock.calls.map(([command]) => command)
+}
+
 describe('PulumiProvider.setPulumiConfig (via getPlan)', () => {
   beforeEach(() => {
+    spawnWithLineStream.mockReset()
+    spawnWithLineStream.mockResolvedValue({ exitCode: 0, stdout: '{}' })
+
     vi.mocked(execFile).mockReset()
     vi.mocked(execFile).mockImplementation(
       (
@@ -61,10 +80,11 @@ describe('PulumiProvider.setPulumiConfig (via getPlan)', () => {
     vi.mocked(exec).mockReset()
     vi.mocked(exec).mockImplementation(((
       _cmd: string,
-      _opts: unknown,
-      cb: (err: null, result: { stdout: string; stderr: string }) => void,
+      optsOrCb: unknown,
+      cb?: (err: null, result: { stdout: string; stderr: string }) => void,
     ) => {
-      cb(null, { stdout: '{}', stderr: '' })
+      const callback = typeof optsOrCb === 'function' ? optsOrCb : cb
+      callback?.(null, { stdout: '{}', stderr: '' })
     }) as never)
   })
 
@@ -190,5 +210,65 @@ describe('PulumiProvider.setPulumiConfig (via getPlan)', () => {
     // 'shared=root-val' and 'shared=env-val' should NOT appear
     expect(args).not.toContain('shared=root-val')
     expect(args).not.toContain('shared=env-val')
+  })
+})
+
+describe('PulumiProvider.selectEnvironment', () => {
+  beforeEach(() => {
+    spawnWithLineStream.mockReset()
+    spawnWithLineStream.mockResolvedValue({ exitCode: 0, stdout: '' })
+
+    vi.mocked(exec).mockReset()
+    vi.mocked(exec).mockImplementation(((
+      _cmd: string,
+      optsOrCb: unknown,
+      cb?: (err: null, result: { stdout: string; stderr: string }) => void,
+    ) => {
+      const callback = typeof optsOrCb === 'function' ? optsOrCb : cb
+      callback?.(null, { stdout: '{}', stderr: '' })
+    }) as never)
+  })
+
+  it('should initialize a stack only when Pulumi explicitly reports it is missing', async () => {
+    let selectAttempts = 0
+    spawnWithLineStream.mockImplementation(async (command, options) => {
+      if (command === 'pulumi stack select qa') {
+        selectAttempts += 1
+        if (selectAttempts === 1) {
+          options.onStderrLine?.("error: no stack named 'qa' found")
+          return { exitCode: 1, stdout: '' }
+        }
+      }
+
+      return { exitCode: 0, stdout: '' }
+    })
+
+    await pulumiProvider.selectEnvironment(makeConfig({ envs: { qa: { backend_config: {} } } }), 'qa')
+
+    expect(getPulumiCommands()).toEqual([
+      'pulumi install',
+      'pulumi stack select qa',
+      'pulumi stack init qa',
+      'pulumi stack select qa',
+    ])
+  })
+
+  it('should fail fast and not initialize when stack selection reports a backend error', async () => {
+    spawnWithLineStream.mockImplementation(async (command, options) => {
+      if (command === 'pulumi stack select qa') {
+        options.onStderrLine?.(
+          'error: failed to list stacks: azureblob.OpenBucket: dial tcp: lookup storage.example.net: no such host',
+        )
+        return { exitCode: 1, stdout: '' }
+      }
+
+      return { exitCode: 0, stdout: '' }
+    })
+
+    await expect(
+      pulumiProvider.selectEnvironment(makeConfig({ envs: { qa: { backend_config: {} } } }), 'qa'),
+    ).rejects.toThrow(/failed to list stacks|azureblob|dial tcp/)
+
+    expect(getPulumiCommands()).toEqual(['pulumi install', 'pulumi stack select qa'])
   })
 })

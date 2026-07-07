@@ -154,11 +154,19 @@ class PulumiProvider implements IProvider {
 
   private isStackNotFoundError(error: unknown, env: string): boolean {
     if (!(error instanceof ProviderError)) return false
-    // Check formatted message (may include diagnostic summaries)
-    if (error.message.includes(`no stack named`) && error.message.includes(env)) return true
-    // Check command — if it was a `stack select` and diagnostics are empty, the stack doesn't exist
-    if (error.command?.includes('stack select') && error.diagnostics.length === 0) return true
-    return false
+    if (!error.command?.includes('stack select')) return false
+
+    const diagnosticText = error.diagnostics
+      .map((d) => `${d.summary}\n${d.detail}`)
+      .join('\n')
+      .toLowerCase()
+    const envName = escapeRegExp(env.toLowerCase())
+
+    return (
+      new RegExp(`no stack named\\s+['"]?${envName}['"]?`).test(diagnosticText) ||
+      new RegExp(`stack\\s+['"]?${envName}['"]?\\s+(was\\s+)?not found`).test(diagnosticText) ||
+      new RegExp(`stack\\s+['"]?${envName}['"]?\\s+does not exist`).test(diagnosticText)
+    )
   }
 
   private async getOutputsWithSecretDetection(configuration: ProviderConfig, env: string): Promise<ProviderOutput> {
@@ -290,6 +298,7 @@ class PulumiProvider implements IProvider {
   ): Promise<string> {
     const options = this.getDefaultExecOptions(configuration, env)
     logger.debug(`[pulumi] exec (streaming): ${command}\n  cwd: ${configuration.rootPath}`)
+    const stderrLines: string[] = []
     const result = await spawnWithLineStream(command, {
       cwd: options.cwd as string,
       env: options.env as NodeJS.ProcessEnv | undefined,
@@ -298,12 +307,13 @@ class PulumiProvider implements IProvider {
         if (event) onEvent(event)
       },
       onStderrLine: (line) => {
+        stderrLines.push(line)
         logger.debug(`[pulumi] stderr: ${line}`)
       },
     })
 
     if (result.exitCode !== 0) {
-      const diagnostics = extractPulumiDiagnostics(result.stdout, '')
+      const diagnostics = extractPulumiDiagnostics(result.stdout, stderrLines.join('\n'))
       const message = formatProviderErrorMessage('Pulumi', configuration.alias, diagnostics, command)
       throw new ProviderError(message, 'pulumi', configuration.alias, { diagnostics, command })
     }
@@ -376,6 +386,10 @@ class PulumiProvider implements IProvider {
 
 function toNonSecretInput(vars: Record<string, string>): ProviderInput {
   return Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, { value: v, secret: false }]))
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 export function resolveFileBackendPath(rootPath: string, backendUrl: string): string {
