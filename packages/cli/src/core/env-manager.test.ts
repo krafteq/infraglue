@@ -72,6 +72,19 @@ describe('EnvManager', () => {
     expect(mockUpdate).toHaveBeenCalledTimes(2)
   })
 
+  it('should skip provider selection when the env is already selected for all affected workspaces', async () => {
+    sharedState.startSelectingEnv('dev')
+    sharedState.finishEnvSelection(['ws1', 'ws2'])
+    const monorepo = createTestMonorepo({ ws1: ['dev'], ws2: ['dev'], ws3: ['prod'] })
+    const { WorkspaceInterop } = await import('./workspace-interop.js')
+
+    const manager = new EnvManager(monorepo)
+    await manager.selectEnv('dev')
+
+    expect(WorkspaceInterop).not.toHaveBeenCalled()
+    expect(mockUpdate).not.toHaveBeenCalled()
+  })
+
   describe('selectedEnv', () => {
     it('should return current env when selected', async () => {
       sharedState.startSelectingEnv('dev')
