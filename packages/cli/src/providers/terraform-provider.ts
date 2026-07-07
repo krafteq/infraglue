@@ -460,7 +460,12 @@ export function parseTerraformPlanOutput(terraformOutput: string, projectName: s
         status: 'pending',
         before: change.before ?? null,
         after: change.after ?? null,
-        metadata: {},
+        metadata: {
+          afterUnknown: change.after_unknown,
+          beforeSensitive: change.before_sensitive,
+          afterSensitive: change.after_sensitive,
+          replacePaths: change.replace_paths,
+        },
       })
     }
 
@@ -525,7 +530,15 @@ export function enrichPlanWithShowOutput(plan: ProviderPlan, showOutput: string)
   let showData: {
     resource_changes?: Array<{
       address: string
-      change?: { before?: Record<string, unknown> | null; after?: Record<string, unknown> | null }
+      change?: {
+        actions?: string[]
+        before?: Record<string, unknown> | null
+        after?: Record<string, unknown> | null
+        after_unknown?: unknown
+        before_sensitive?: unknown
+        after_sensitive?: unknown
+        replace_paths?: unknown
+      }
     }>
   }
   try {
@@ -535,23 +548,56 @@ export function enrichPlanWithShowOutput(plan: ProviderPlan, showOutput: string)
   }
   const detailsByAddress = new Map<
     string,
-    { before: Record<string, unknown> | null; after: Record<string, unknown> | null }
+    {
+      actions?: string[] | undefined
+      before: Record<string, unknown> | null
+      after: Record<string, unknown> | null
+      afterUnknown?: unknown | undefined
+      beforeSensitive?: unknown | undefined
+      afterSensitive?: unknown | undefined
+      replacePaths?: unknown | undefined
+    }
   >()
 
   for (const rc of showData.resource_changes ?? []) {
     detailsByAddress.set(rc.address, {
+      actions: rc.change?.actions,
       before: rc.change?.before ?? null,
       after: rc.change?.after ?? null,
+      afterUnknown: rc.change?.after_unknown,
+      beforeSensitive: rc.change?.before_sensitive,
+      afterSensitive: rc.change?.after_sensitive,
+      replacePaths: rc.change?.replace_paths,
     })
   }
 
   const enrichedChanges = plan.resourceChanges.map((rc) => {
     const detail = detailsByAddress.get(rc.address)
     if (detail) {
-      return { ...rc, before: detail.before, after: detail.after }
+      return {
+        ...rc,
+        actions: normalizeTerraformActions(detail.actions) ?? rc.actions,
+        before: detail.before,
+        after: detail.after,
+        metadata: {
+          ...rc.metadata,
+          afterUnknown: detail.afterUnknown,
+          beforeSensitive: detail.beforeSensitive,
+          afterSensitive: detail.afterSensitive,
+          replacePaths: detail.replacePaths,
+        },
+      }
     }
     return rc
   })
 
   return { ...plan, resourceChanges: enrichedChanges }
+}
+
+function normalizeTerraformActions(actions?: string[]): ResourceChange['actions'] | undefined {
+  if (!actions) return undefined
+  if (actions.includes('delete') && actions.includes('create')) return ['replace']
+  const first = actions[0]
+  if (first === 'create' || first === 'update' || first === 'delete' || first === 'no-op') return [first]
+  return undefined
 }

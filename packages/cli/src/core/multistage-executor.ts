@@ -12,7 +12,7 @@ import {
 } from '../providers/index.js'
 import type { IIntegration } from '../integrations/integration.js'
 import type { IFormatter } from '../formatters/formatter.js'
-import { computeDetailedDiff } from './plan-diff.js'
+import { SENSITIVE_VALUE, UNKNOWN_AFTER_APPLY, computeDetailedDiff } from './plan-diff.js'
 import {
   WorkspaceApplyState,
   WorkspacePlanState,
@@ -360,12 +360,21 @@ export class MultistageExecutor {
             logger.info(`\n   real changes (${diff.realChangeCount}):`)
             for (const resource of diff.resources) {
               if (!resource.isMetadataOnly && resource.attributeDiffs.length > 0) {
-                logger.info(`      ${resource.address}`)
+                logger.info(`      ${resource.address} [${resource.actions.join(', ')}]`)
                 for (const attr of resource.attributeDiffs) {
-                  logger.info(`         ${attr.key}: ${JSON.stringify(attr.before)} → ${JSON.stringify(attr.after)}`)
+                  logger.info(`         ${formatAttributeDiff(attr)}`)
+                }
+                const remainingReplacePaths = resource.replacePaths.filter(
+                  (path) => !resource.attributeDiffs.some((attr) => attr.key === path),
+                )
+                for (const path of remainingReplacePaths) {
+                  logger.info(`         ! ${path} (forces replacement)`)
                 }
               } else if (!resource.isMetadataOnly) {
                 logger.info(`      ${resource.address} [${resource.actions.join(', ')}]`)
+                for (const path of resource.replacePaths) {
+                  logger.info(`         ! ${path} (forces replacement)`)
+                }
               }
             }
           } else {
@@ -673,6 +682,33 @@ export class MultistageExecutor {
     logger.info('\n--------------------------------')
     logger.info('🎉 State refresh completed')
   }
+}
+
+function formatAttributeDiff(attr: {
+  key: string
+  kind: 'added' | 'removed' | 'changed'
+  before: unknown
+  after: unknown
+  forcesReplacement: boolean
+}): string {
+  const replacement = attr.forcesReplacement ? ' (forces replacement)' : ''
+  if (attr.kind === 'added') return `+ ${attr.key}: ${formatDiffValue(attr.after)}${replacement}`
+  if (attr.kind === 'removed') return `- ${attr.key}: ${formatDiffValue(attr.before)}${replacement}`
+  return `~ ${attr.key}: ${formatDiffValue(attr.before)} -> ${formatDiffValue(attr.after)}${replacement}`
+}
+
+function formatDiffValue(value: unknown): string {
+  if (value === UNKNOWN_AFTER_APPLY) return '<known after apply>'
+  if (value === SENSITIVE_VALUE) return '<sensitive>'
+  if (typeof value === 'string') return JSON.stringify(value)
+  if (value === undefined) return '<absent>'
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return value.length === 0 ? '[]' : `[${value.length} items]`
+  if (typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>)
+    return keys.length === 0 ? '{}' : `{${keys.length} keys}`
+  }
+  return String(value)
 }
 
 export interface IDriftOptions {

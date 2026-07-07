@@ -1,5 +1,5 @@
 import type { ProviderPlan, ResourceChange, Diagnostic, ChangeSummary, Output } from '../providers/provider-plan.js'
-import { diffAttributes } from '../core/plan-diff.js'
+import { SENSITIVE_VALUE, UNKNOWN_AFTER_APPLY, diffAttributes } from '../core/plan-diff.js'
 import pc from 'picocolors'
 
 // TODO: refactor this.
@@ -275,16 +275,35 @@ export class DefaultFormatter {
     if (!change.actions.some((a) => a === 'update' || a === 'replace')) return []
     if (!change.before || !change.after) return []
 
-    const diffs = diffAttributes(change.before, change.after)
+    const diffs = diffAttributes(change.before, change.after, change.metadata)
     if (diffs.length === 0) return []
 
     return diffs.map((diff) => {
-      const isAdded = diff.before === undefined
-      const isRemoved = diff.after === undefined
+      const isAdded = diff.kind === 'added'
+      const isRemoved = diff.kind === 'removed'
       const symbol = isAdded ? '+' : isRemoved ? '-' : '~'
       const color = isAdded ? pc.green : isRemoved ? pc.red : pc.yellow
-      return `      ${color(symbol + ' ' + diff.key)}`
+      const replacement = diff.forcesReplacement ? ' (forces replacement)' : ''
+      if (isAdded) return `      ${color(`${symbol} ${diff.key}: ${this.formatValue(diff.after)}${replacement}`)}`
+      if (isRemoved) return `      ${color(`${symbol} ${diff.key}: ${this.formatValue(diff.before)}${replacement}`)}`
+      return `      ${color(
+        `${symbol} ${diff.key}: ${this.formatValue(diff.before)} -> ${this.formatValue(diff.after)}${replacement}`,
+      )}`
     })
+  }
+
+  private static formatValue(value: unknown): string {
+    if (value === UNKNOWN_AFTER_APPLY) return '<known after apply>'
+    if (value === SENSITIVE_VALUE) return '<sensitive>'
+    if (typeof value === 'string') return JSON.stringify(value)
+    if (value === undefined) return '<absent>'
+    if (value === null || typeof value === 'number' || typeof value === 'boolean') return String(value)
+    if (Array.isArray(value)) return value.length === 0 ? '[]' : `[${value.length} items]`
+    if (typeof value === 'object') {
+      const keys = Object.keys(value as Record<string, unknown>)
+      return keys.length === 0 ? '{}' : `{${keys.length} keys}`
+    }
+    return String(value)
   }
 
   /**

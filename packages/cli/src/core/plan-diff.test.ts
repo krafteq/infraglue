@@ -1,4 +1,5 @@
 import { computeDetailedDiff } from './plan-diff.js'
+import { SENSITIVE_VALUE, UNKNOWN_AFTER_APPLY, diffAttributes } from './plan-diff.js'
 import type { ResourceChange } from '../providers/provider-plan.js'
 
 function makeResourceChange(overrides: Partial<ResourceChange> = {}): ResourceChange {
@@ -26,7 +27,9 @@ describe('computeDetailedDiff', () => {
 
     expect(result.resources).toHaveLength(1)
     expect(result.resources[0].isMetadataOnly).toBe(false)
-    expect(result.resources[0].attributeDiffs).toEqual([{ key: 'ami', before: 'ami-old', after: 'ami-new' }])
+    expect(result.resources[0].attributeDiffs).toMatchObject([
+      { key: 'ami', kind: 'changed', before: 'ami-old', after: 'ami-new' },
+    ])
     expect(result.realChangeCount).toBe(1)
     expect(result.metadataOnlyCount).toBe(0)
   })
@@ -84,8 +87,8 @@ describe('computeDetailedDiff', () => {
     ])
 
     expect(result.resources[0].isMetadataOnly).toBe(false)
-    expect(result.resources[0].attributeDiffs).toEqual([
-      { key: 'tags', before: { Name: 'old', Env: 'dev' }, after: { Name: 'new', Env: 'dev' } },
+    expect(result.resources[0].attributeDiffs).toMatchObject([
+      { key: 'tags.Name', kind: 'changed', before: 'old', after: 'new' },
     ])
   })
 
@@ -111,7 +114,12 @@ describe('computeDetailedDiff', () => {
 
     expect(result.resources[0].isMetadataOnly).toBe(false)
     expect(result.resources[0].attributeDiffs).toHaveLength(1)
-    expect(result.resources[0].attributeDiffs[0].key).toBe('security_groups')
+    expect(result.resources[0].attributeDiffs[0]).toMatchObject({
+      key: 'security_groups[1]',
+      kind: 'changed',
+      before: 'sg-2',
+      after: 'sg-3',
+    })
   })
 
   it('should handle identical arrays as metadata-only', () => {
@@ -134,7 +142,9 @@ describe('computeDetailedDiff', () => {
     ])
 
     expect(result.resources[0].isMetadataOnly).toBe(false)
-    expect(result.resources[0].attributeDiffs).toEqual([{ key: 'new_key', before: undefined, after: 'value' }])
+    expect(result.resources[0].attributeDiffs).toMatchObject([
+      { key: 'new_key', kind: 'added', before: undefined, after: 'value' },
+    ])
   })
 
   it('should detect removed keys', () => {
@@ -146,7 +156,9 @@ describe('computeDetailedDiff', () => {
     ])
 
     expect(result.resources[0].isMetadataOnly).toBe(false)
-    expect(result.resources[0].attributeDiffs).toEqual([{ key: 'old_key', before: 'value', after: undefined }])
+    expect(result.resources[0].attributeDiffs).toMatchObject([
+      { key: 'old_key', kind: 'removed', before: 'value', after: undefined },
+    ])
   })
 
   it('should aggregate counts across multiple resources', () => {
@@ -219,17 +231,72 @@ describe('computeDetailedDiff', () => {
     expect(result.realChangeCount).toBe(1)
   })
 
-  it('should handle replace actions as non-update (not metadata-only)', () => {
+  it('should diff replace actions when before/after are available', () => {
     const result = computeDetailedDiff([
       makeResourceChange({
         actions: ['replace'],
-        before: { ami: 'ami-123' },
-        after: { ami: 'ami-123' },
+        before: { ami: 'ami-old' },
+        after: { ami: 'ami-new' },
       }),
     ])
 
-    // replace is not 'update', so it skips attribute diffing and is treated as a real change
     expect(result.resources[0].isMetadataOnly).toBe(false)
+    expect(result.resources[0].attributeDiffs).toMatchObject([
+      { key: 'ami', kind: 'changed', before: 'ami-old', after: 'ami-new' },
+    ])
     expect(result.realChangeCount).toBe(1)
+  })
+
+  it('should report array object changes at indexed leaf paths', () => {
+    const result = computeDetailedDiff([
+      makeResourceChange({
+        before: { rules: [{ cidr: '10.0.0.0/24' }, { cidr: '10.0.1.0/24' }] },
+        after: { rules: [{ cidr: '10.0.0.0/24' }, { cidr: '10.0.2.0/24' }, { cidr: '10.0.3.0/24' }] },
+      }),
+    ])
+
+    expect(result.resources[0].attributeDiffs).toMatchObject([
+      { key: 'rules[1].cidr', kind: 'changed', before: '10.0.1.0/24', after: '10.0.2.0/24' },
+      { key: 'rules[2].cidr', kind: 'added', before: undefined, after: '10.0.3.0/24' },
+    ])
+  })
+
+  it('should render unknown-after-apply as a placeholder sentinel', () => {
+    const diffs = diffAttributes(
+      { id: null },
+      { id: null },
+      {
+        afterUnknown: { id: true },
+      },
+    )
+
+    expect(diffs).toMatchObject([{ key: 'id', kind: 'changed', before: null, after: UNKNOWN_AFTER_APPLY }])
+  })
+
+  it('should mask sensitive values in diffs', () => {
+    const diffs = diffAttributes(
+      { password: 'old-secret' },
+      { password: 'new-secret' },
+      {
+        beforeSensitive: { password: true },
+        afterSensitive: { password: true },
+      },
+    )
+
+    expect(diffs).toMatchObject([{ key: 'password', kind: 'changed', before: SENSITIVE_VALUE, after: SENSITIVE_VALUE }])
+  })
+
+  it('should mark replacement paths on changed leaves', () => {
+    const result = computeDetailedDiff([
+      makeResourceChange({
+        actions: ['replace'],
+        before: { tags: { owner: 'platform' } },
+        after: { tags: { owner: 'app' } },
+        metadata: { replacePaths: [['tags']] },
+      }),
+    ])
+
+    expect(result.resources[0].replacePaths).toEqual(['tags'])
+    expect(result.resources[0].attributeDiffs).toMatchObject([{ key: 'tags.owner', forcesReplacement: true }])
   })
 })

@@ -240,4 +240,35 @@ describe('enrichPlanWithShowOutput', () => {
     // No match found — original before/after preserved
     expect(enriched.resourceChanges[0].before).toEqual(plan.resourceChanges[0].before)
   })
+
+  it('should merge provider diff metadata from show output', () => {
+    const plan = parseTerraformPlanOutput(TERRAFORM_PLAN_UPDATE, 'proj')
+    const enriched = enrichPlanWithShowOutput(
+      plan,
+      JSON.stringify({
+        resource_changes: [
+          {
+            address: 'docker_container.app',
+            change: {
+              actions: ['delete', 'create'],
+              before: { image: 'node:18', password: 'old-secret', id: 'abc' },
+              after: { image: 'node:20', password: 'new-secret', id: null },
+              after_unknown: { id: true },
+              before_sensitive: { password: true },
+              after_sensitive: { password: true },
+              replace_paths: [['image']],
+            },
+          },
+        ],
+      }),
+    )
+
+    expect(enriched.resourceChanges[0].actions).toEqual(['replace'])
+    expect(enriched.resourceChanges[0].metadata).toMatchObject({
+      afterUnknown: { id: true },
+      beforeSensitive: { password: true },
+      afterSensitive: { password: true },
+      replacePaths: [['image']],
+    })
+  })
 })

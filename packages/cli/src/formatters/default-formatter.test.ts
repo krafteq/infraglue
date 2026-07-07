@@ -83,7 +83,7 @@ describe('DefaultFormatter', () => {
       expect(output).toBe('')
     })
 
-    it('should show changed property names under update resources', () => {
+    it('should show changed property paths and values under update resources', () => {
       const plan = createProviderPlan({
         changeSummary: { add: 0, change: 1, remove: 0, replace: 0, outputUpdates: 0 },
         resourceChanges: [
@@ -97,8 +97,8 @@ describe('DefaultFormatter', () => {
 
       const output = DefaultFormatter.format(plan)
 
-      expect(output).toContain('~ ami')
-      expect(output).toContain('~ tags')
+      expect(output).toContain('~ ami: "ami-old" -> "ami-new"')
+      expect(output).toContain('~ tags.env: "dev" -> "prod"')
       expect(output).not.toContain('~ name')
     })
 
@@ -116,8 +116,8 @@ describe('DefaultFormatter', () => {
 
       const output = DefaultFormatter.format(plan)
 
-      expect(output).toContain('- old_field')
-      expect(output).toContain('+ new_field')
+      expect(output).toContain('- old_field: "val"')
+      expect(output).toContain('+ new_field: "val"')
     })
 
     it('should show property diffs for replace resources', () => {
@@ -134,7 +134,50 @@ describe('DefaultFormatter', () => {
 
       const output = DefaultFormatter.format(plan)
 
-      expect(output).toContain('~ ami')
+      expect(output).toContain('~ ami: "ami-old" -> "ami-new"')
+    })
+
+    it('should mask sensitive values and render unknown placeholders', () => {
+      const plan = createProviderPlan({
+        changeSummary: { add: 0, change: 1, remove: 0, replace: 0, outputUpdates: 0 },
+        resourceChanges: [
+          createResourceChange({
+            actions: ['update'],
+            before: { password: 'old-secret', id: null },
+            after: { password: 'new-secret', id: null },
+            metadata: {
+              beforeSensitive: { password: true },
+              afterSensitive: { password: true },
+              afterUnknown: { id: true },
+            },
+          }),
+        ],
+      })
+
+      const output = DefaultFormatter.format(plan)
+
+      expect(output).toContain('~ id: null -> <known after apply>')
+      expect(output).toContain('~ password: <sensitive> -> <sensitive>')
+      expect(output).not.toContain('old-secret')
+      expect(output).not.toContain('new-secret')
+    })
+
+    it('should mark replacement-causing property paths', () => {
+      const plan = createProviderPlan({
+        changeSummary: { add: 0, change: 0, remove: 0, replace: 1, outputUpdates: 0 },
+        resourceChanges: [
+          createResourceChange({
+            actions: ['replace'],
+            before: { tags: { owner: 'platform' } },
+            after: { tags: { owner: 'app' } },
+            metadata: { replacePaths: [['tags']] },
+          }),
+        ],
+      })
+
+      const output = DefaultFormatter.format(plan)
+
+      expect(output).toContain('~ tags.owner: "platform" -> "app" (forces replacement)')
     })
 
     it('should not show property diffs for create resources', () => {

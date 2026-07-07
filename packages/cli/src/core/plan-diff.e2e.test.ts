@@ -1,4 +1,5 @@
 import { computeDetailedDiff } from './plan-diff.js'
+import { SENSITIVE_VALUE, UNKNOWN_AFTER_APPLY } from './plan-diff.js'
 import { parseTerraformPlanOutput, enrichPlanWithShowOutput } from '../providers/terraform-provider.js'
 import { parsePulumiPreviewOutput } from '../providers/pulumi-provider.js'
 import {
@@ -22,7 +23,9 @@ describe('computeDetailedDiff with real Terraform output', () => {
 
     expect(diff.resources).toHaveLength(1)
     expect(diff.resources[0].isMetadataOnly).toBe(false)
-    expect(diff.resources[0].attributeDiffs).toEqual([{ key: 'image', before: 'node:18', after: 'node:20' }])
+    expect(diff.resources[0].attributeDiffs).toMatchObject([
+      { key: 'image', kind: 'changed', before: 'node:18', after: 'node:20' },
+    ])
     expect(diff.realChangeCount).toBe(1)
     expect(diff.metadataOnlyCount).toBe(0)
   })
@@ -68,7 +71,7 @@ describe('computeDetailedDiff with real Terraform output', () => {
     // docker_container.app — real update (image changed)
     const app = diff.resources.find((r) => r.address === 'docker_container.app')!
     expect(app.isMetadataOnly).toBe(false)
-    expect(app.attributeDiffs).toEqual([{ key: 'image', before: 'node:18', after: 'node:20' }])
+    expect(app.attributeDiffs).toMatchObject([{ key: 'image', before: 'node:18', after: 'node:20' }])
 
     // docker_network.main — metadata-only (identical before/after)
     const network = diff.resources.find((r) => r.address === 'docker_network.main')!
@@ -96,7 +99,7 @@ describe('computeDetailedDiff with enriched Terraform output (streaming + show)'
     // docker_container.app — real update (image changed from node:18 to node:20)
     const app = diff.resources.find((r) => r.address === 'docker_container.app')!
     expect(app.isMetadataOnly).toBe(false)
-    expect(app.attributeDiffs).toEqual([{ key: 'image', before: 'node:18', after: 'node:20' }])
+    expect(app.attributeDiffs).toMatchObject([{ key: 'image', before: 'node:18', after: 'node:20' }])
 
     // docker_network.main — metadata-only (identical before/after from show output)
     const network = diff.resources.find((r) => r.address === 'docker_network.main')!
@@ -109,6 +112,84 @@ describe('computeDetailedDiff with enriched Terraform output (streaming + show)'
 
     expect(diff.realChangeCount).toBe(2)
     expect(diff.metadataOnlyCount).toBe(1)
+  })
+
+  it('should report nested object and array leaf paths from Terraform show output', () => {
+    const plan = parseTerraformPlanOutput(
+      [
+        '{"type":"planned_change","change":{"resource":{"addr":"aws_security_group.web","resource_type":"aws_security_group","resource_name":"web"},"action":"update","before":{},"after":{}}}',
+        '{"type":"change_summary","changes":{"add":0,"change":1,"remove":0,"replace":0}}',
+      ].join('\n'),
+      'proj',
+    )
+    const enriched = enrichPlanWithShowOutput(
+      plan,
+      JSON.stringify({
+        resource_changes: [
+          {
+            address: 'aws_security_group.web',
+            change: {
+              actions: ['update'],
+              before: {
+                tags: { owner: 'platform', env: 'dev' },
+                rules: [{ cidr: '10.0.0.0/24' }, { cidr: '10.0.1.0/24' }],
+              },
+              after: {
+                tags: { owner: 'app', env: 'dev' },
+                rules: [{ cidr: '10.0.0.0/24' }, { cidr: '10.0.2.0/24' }, { cidr: '10.0.3.0/24' }],
+              },
+            },
+          },
+        ],
+      }),
+    )
+
+    const diff = computeDetailedDiff(enriched.resourceChanges)
+
+    expect(diff.resources[0].attributeDiffs).toMatchObject([
+      { key: 'rules[1].cidr', kind: 'changed', before: '10.0.1.0/24', after: '10.0.2.0/24' },
+      { key: 'rules[2].cidr', kind: 'added', before: undefined, after: '10.0.3.0/24' },
+      { key: 'tags.owner', kind: 'changed', before: 'platform', after: 'app' },
+    ])
+  })
+
+  it('should surface Terraform replacement, unknown, and sensitive metadata', () => {
+    const plan = parseTerraformPlanOutput(
+      [
+        '{"type":"planned_change","change":{"resource":{"addr":"aws_instance.web","resource_type":"aws_instance","resource_name":"web"},"action":"update","before":{},"after":{}}}',
+        '{"type":"change_summary","changes":{"add":0,"change":0,"remove":0,"replace":1}}',
+      ].join('\n'),
+      'proj',
+    )
+    const enriched = enrichPlanWithShowOutput(
+      plan,
+      JSON.stringify({
+        resource_changes: [
+          {
+            address: 'aws_instance.web',
+            change: {
+              actions: ['delete', 'create'],
+              before: { ami: 'ami-old', id: 'i-123', password: 'old-secret' },
+              after: { ami: 'ami-new', id: null, password: 'new-secret' },
+              after_unknown: { id: true },
+              before_sensitive: { password: true },
+              after_sensitive: { password: true },
+              replace_paths: [['ami']],
+            },
+          },
+        ],
+      }),
+    )
+
+    const diff = computeDetailedDiff(enriched.resourceChanges)
+
+    expect(diff.resources[0].actions).toEqual(['replace'])
+    expect(diff.resources[0].replacePaths).toEqual(['ami'])
+    expect(diff.resources[0].attributeDiffs).toMatchObject([
+      { key: 'ami', forcesReplacement: true },
+      { key: 'id', after: UNKNOWN_AFTER_APPLY },
+      { key: 'password', before: SENSITIVE_VALUE, after: SENSITIVE_VALUE },
+    ])
   })
 })
 
@@ -131,7 +212,7 @@ describe('computeDetailedDiff with real Pulumi output', () => {
 
     expect(diff.resources).toHaveLength(1)
     expect(diff.resources[0].isMetadataOnly).toBe(false)
-    expect(diff.resources[0].attributeDiffs).toEqual([{ key: 'image', before: 'node:18', after: 'node:20' }])
+    expect(diff.resources[0].attributeDiffs).toMatchObject([{ key: 'image', before: 'node:18', after: 'node:20' }])
     expect(diff.realChangeCount).toBe(1)
     expect(diff.metadataOnlyCount).toBe(0)
   })
@@ -157,7 +238,7 @@ describe('computeDetailedDiff with real Pulumi output', () => {
     // update has real diff (instanceType changed)
     const update = diff.resources.find((r) => r.actions.includes('update'))!
     expect(update.isMetadataOnly).toBe(false)
-    expect(update.attributeDiffs).toEqual([{ key: 'instanceType', before: 't2.micro', after: 't3.medium' }])
+    expect(update.attributeDiffs).toMatchObject([{ key: 'instanceType', before: 't2.micro', after: 't3.medium' }])
 
     // same/no-op is not an 'update' action, so it's not diffed for metadata-only
     const noop = diff.resources.find((r) => r.actions.includes('no-op'))!
@@ -170,5 +251,32 @@ describe('computeDetailedDiff with real Pulumi output', () => {
 
     expect(diff.resources).toHaveLength(1)
     expect(diff.resources[0].actions).toEqual(['no-op'])
+  })
+
+  it('should report nested Pulumi detailed diff leaf paths', () => {
+    const plan = parsePulumiPreviewOutput(
+      JSON.stringify({
+        steps: [
+          {
+            op: 'update',
+            urn: 'urn:pulumi:dev::network::docker:index/container:Container::app-container',
+            oldState: { inputs: { tags: { owner: 'platform' }, ports: [{ internal: 80, external: 8080 }] } },
+            newState: { inputs: { tags: { owner: 'app' }, ports: [{ internal: 80, external: 8081 }] } },
+            detailedDiff: {
+              'tags.owner': { kind: 'UPDATE' },
+              'ports[0].external': { kind: 'UPDATE' },
+            },
+          },
+        ],
+      }),
+      'proj',
+    )
+
+    const diff = computeDetailedDiff(plan.resourceChanges)
+
+    expect(diff.resources[0].attributeDiffs).toMatchObject([
+      { key: 'ports[0].external', before: 8080, after: 8081 },
+      { key: 'tags.owner', before: 'platform', after: 'app' },
+    ])
   })
 })

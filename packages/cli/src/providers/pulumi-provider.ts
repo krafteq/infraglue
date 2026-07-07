@@ -480,7 +480,12 @@ export function parsePulumiPreviewOutput(pulumiOutput: string, projectName: stri
         status: 'pending',
         before: step.oldState?.inputs ?? null,
         after: step.newState?.inputs ?? step.resource?.properties ?? null,
-        metadata: {},
+        metadata: {
+          detailedDiff: step.detailedDiff,
+          inputDiff: step.inputDiff,
+          outputDiff: step.outputDiff,
+          replacePaths: pulumiReplacePaths(step.detailedDiff),
+        },
       })
     }
   }
@@ -506,4 +511,16 @@ export function parsePulumiPreviewOutput(pulumiOutput: string, projectName: stri
     changeSummary,
     metadata: { rawOutput: pulumiOutput },
   }
+}
+
+function pulumiReplacePaths(detailedDiff: unknown): string[] {
+  if (!detailedDiff || typeof detailedDiff !== 'object' || Array.isArray(detailedDiff)) return []
+
+  return Object.entries(detailedDiff as Record<string, { kind?: unknown; inputDiff?: boolean }>)
+    .filter(([, diff]) => {
+      const kind = typeof diff.kind === 'string' ? diff.kind.toLowerCase() : ''
+      return kind.includes('replace')
+    })
+    .map(([path]) => path)
+    .sort()
 }
