@@ -31,7 +31,7 @@ InfraGlue orchestrates multiple Terraform and Pulumi workspaces in a single mono
 
 2. **Never run ig commands concurrently.** ig uses a process-local mutex to protect `.ig/state.json`. Running two `ig` processes at the same time causes race conditions — lost output data, broken dependency injection, and corrupted state. Always wait for one `ig` command to finish before starting the next.
 
-3. **Select the environment once, then omit `--env`.** For single-environment setups (or when working in one env for a session), run `ig env select <env>` once at the start. All subsequent commands use the selected env automatically. Only pass `--env` when you need to switch environments mid-session.
+3. **Select the environment once, then omit `--env`.** For single-environment setups (or when working in one env for a session), run `ig env select <env>` once at the start. All subsequent commands use the selected env automatically. Only pass `--env` when you need to switch environments mid-session. For Pulumi workspaces, `ig env select` creates a stack only when Pulumi explicitly reports that the requested stack is missing; backend, network, or auth errors fail fast so an uncertain state is not treated as a missing stack.
 
 4. **Prefer whole-monorepo commands.** `ig plan`, `ig apply`, `ig destroy`, and `ig drift` all operate across every workspace by default. Only use `--project` for targeted single-workspace operations like debugging, import, or export.
 
