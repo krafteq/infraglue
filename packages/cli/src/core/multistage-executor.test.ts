@@ -187,6 +187,112 @@ describe('MultistageExecutor', () => {
       expect(ctx.findAppliedOutput('ws1', 'existing')).toEqual({ value: 'value', secret: false })
     })
 
+    it('should apply workspace with no changes when allowEmpty is set', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(createProviderPlan())
+      mockGetOutputs.mockResolvedValue({ outputs: { existing: { value: 'value', secret: false } }, actual: true })
+      mockApply.mockResolvedValue({ existing: { value: 'updated', secret: false } })
+
+      const integration = createInteractiveIntegration()
+      await executor.exec({ formatter: createFormatter(), integration, allowEmpty: true })
+
+      expect(integration.askForConfirmation).toHaveBeenCalledOnce()
+      expect(mockApply).toHaveBeenCalledOnce()
+      expect(ctx.findAppliedOutput('ws1', 'existing')).toEqual({ value: 'updated', secret: false })
+    })
+
+    it('should not pass allowEmpty through to the provider plan', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockGetPlan.mockResolvedValue(createProviderPlan())
+      mockGetOutputs.mockResolvedValue({ outputs: {}, actual: true })
+      mockApply.mockResolvedValue({})
+
+      await executor.exec({
+        formatter: createFormatter(),
+        integration: createInteractiveIntegration(),
+        allowEmpty: true,
+      })
+
+      expect(mockGetPlan).toHaveBeenCalledWith(expect.anything(), { savePlanFile: true })
+    })
+
+    it('should still apply only changed workspaces in a level without allowEmpty', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      let planCallCount = 0
+      mockGetPlan.mockImplementation(async () => {
+        planCallCount++
+        if (planCallCount === 1) return createProviderPlan()
+        return createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } })
+      })
+      mockGetOutputs.mockResolvedValue({ outputs: {}, actual: true })
+      mockApply.mockResolvedValue({})
+
+      await executor.exec({ formatter: createFormatter(), integration: createInteractiveIntegration() })
+
+      expect(mockApply).toHaveBeenCalledOnce()
+    })
+
+    it('should apply every workspace in a level with allowEmpty, including unchanged ones', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const ws2 = createWs('ws2')
+      const monorepo = new Monorepo('/root', [ws1, ws2], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, false, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      let planCallCount = 0
+      mockGetPlan.mockImplementation(async () => {
+        planCallCount++
+        if (planCallCount === 1) return createProviderPlan()
+        return createProviderPlan({ changeSummary: { add: 1, change: 0, remove: 0, replace: 0, outputUpdates: 0 } })
+      })
+      mockGetOutputs.mockResolvedValue({ outputs: {}, actual: true })
+      mockApply.mockResolvedValue({})
+
+      await executor.exec({
+        formatter: createFormatter(),
+        integration: createInteractiveIntegration(),
+        allowEmpty: true,
+      })
+
+      expect(mockApply).toHaveBeenCalledTimes(2)
+    })
+
+    it('should not destroy workspaces with empty destroy plans even with allowEmpty', async () => {
+      envSelected()
+      const ws1 = createWs('ws1')
+      const monorepo = new Monorepo('/root', [ws1], [], undefined)
+      const ctx = new ExecutionContext(monorepo, undefined, false, true, 'dev')
+      const executor = new MultistageExecutor(ctx)
+
+      mockIsDestroyed.mockResolvedValue(false)
+      mockDestroyPlan.mockResolvedValue(createProviderPlan())
+
+      await executor.exec({
+        formatter: createFormatter(),
+        integration: createInteractiveIntegration(),
+        allowEmpty: true,
+      })
+
+      expect(mockDestroy).not.toHaveBeenCalled()
+    })
+
     it('should abort when confirmation denied', async () => {
       envSelected()
       const ws1 = createWs('ws1')

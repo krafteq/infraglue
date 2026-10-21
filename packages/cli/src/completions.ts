@@ -27,7 +27,7 @@ _ig_completions() {
   esac
 
   if [[ "\${cur}" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--env --format --integration --approve --up-to-level --verbose --quiet --strict --directory --help --json --project --no-deps --detailed --refresh-only --start-with-project" -- "\${cur}") )
+    COMPREPLY=( $(compgen -W "--env --format --integration --approve --up-to-level --verbose --quiet --strict --directory --help --json --project --no-deps --detailed --refresh-only --start-with-project --allow-empty" -- "\${cur}") )
   fi
 }
 complete -F _ig_completions ig
@@ -79,7 +79,8 @@ _ig() {
             '(-u --up-to-level)'{-u,--up-to-level}'[Stop after level N]:level:' \\
             '(-p --project)'{-p,--project}'[Project name]:project:' \\
             '--no-deps[Ignore dependencies]' \\
-            '--start-with-project[Skip levels before project]:project:'
+            '--start-with-project[Skip levels before project]:project:' \\
+            '--allow-empty[Apply even when plan shows no changes (apply only)]'
           ;;
         plan)
           _arguments \\
@@ -166,6 +167,7 @@ complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s p -l project -d
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -l no-deps -d 'Ignore dependencies'
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -l start-with-project -d 'Skip levels before project' -r
 complete -c ig -n '__fish_seen_subcommand_from apply destroy' -s u -l up-to-level -d 'Stop after level N' -r
+complete -c ig -n '__fish_seen_subcommand_from apply' -l allow-empty -d 'Apply even when plan shows no changes'
 
 # plan options
 complete -c ig -n '__fish_seen_subcommand_from plan' -s e -l env -d 'Environment name' -r

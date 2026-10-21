@@ -111,10 +111,7 @@ export class MultistageExecutor {
     return targetLevelIndex
   }
 
-  private async gatherLevelPlans(
-    workspaces: Workspace[],
-    options?: { detailed?: boolean; savePlanFile?: boolean },
-  ): Promise<LevelPlanEntry[]> {
+  private async gatherLevelPlans(workspaces: Workspace[], options?: PlanWorkspaceOptions): Promise<LevelPlanEntry[]> {
     if (workspaces.length <= 1) {
       return this.gatherLevelPlansSequential(workspaces, options)
     }
@@ -123,7 +120,7 @@ export class MultistageExecutor {
 
   private async gatherLevelPlansSequential(
     workspaces: Workspace[],
-    options?: { detailed?: boolean; savePlanFile?: boolean },
+    options?: PlanWorkspaceOptions,
   ): Promise<LevelPlanEntry[]> {
     const levelPlans: LevelPlanEntry[] = []
 
@@ -137,7 +134,7 @@ export class MultistageExecutor {
 
   private async gatherLevelPlansParallel(
     workspaces: Workspace[],
-    options?: { detailed?: boolean; savePlanFile?: boolean },
+    options?: PlanWorkspaceOptions,
   ): Promise<LevelPlanEntry[]> {
     const isTTY = process.stderr.isTTY ?? false
     const renderer: IPlanRenderer = isTTY ? new PlanLiveRenderer() : new PlanNonTtyRenderer()
@@ -202,8 +199,10 @@ export class MultistageExecutor {
   private async planSingleWorkspace(
     workspace: Workspace,
     state: WorkspacePlanState | null,
-    options?: { detailed?: boolean; savePlanFile?: boolean },
+    options?: PlanWorkspaceOptions,
   ): Promise<LevelPlanEntry | null> {
+    const { allowEmpty, ...providerPlanOptions } = options ?? {}
+    const planOptions = options ? providerPlanOptions : undefined
     const interop = this.ctx.interop(workspace)
 
     state?.markPlanning()
@@ -230,13 +229,21 @@ export class MultistageExecutor {
         return { workspace, inputs, plan }
       } else {
         const inputs: ProviderInput = await this.ctx.getInputs(workspace)
-        const plan = await interop.getPlan(inputs, options)
+        const plan = await interop.getPlan(inputs, planOptions)
 
         if (!hasChanges(plan)) {
           const { outputs } = await interop.getOutputs({ stale: this.ctx.ignoreDependencies })
 
           if (hasOutputDiff(plan.outputs, outputs)) {
             if (!state) logger.info(`📤 ${workspace.name} has output-only changes`)
+            state?.markDone(plan.changeSummary)
+            return { workspace, inputs, plan }
+          }
+
+          // --allow-empty: apply anyway — the program may have effects the plan can't show
+          // (e.g. writing to Vault outside of a tracked resource)
+          if (allowEmpty) {
+            if (!state) logger.info(`📭 ${workspace.name} has no planned changes, applying anyway (--allow-empty)`)
             state?.markDone(plan.changeSummary)
             return { workspace, inputs, plan }
           }
@@ -500,7 +507,10 @@ export class MultistageExecutor {
         continue
       }
 
-      const levelPlans = await this.gatherLevelPlans(level.workspaces, { savePlanFile: true })
+      const levelPlans = await this.gatherLevelPlans(level.workspaces, {
+        savePlanFile: true,
+        allowEmpty: opts.allowEmpty ?? false,
+      })
 
       if (levelPlans.length === 0) {
         logger.info('✅ No changes needed in this level')
@@ -754,6 +764,14 @@ export interface IExecOptions {
   approve?: number[] | 'all' | undefined
   preview?: boolean | undefined
   upToLevel?: number | undefined
+  /** Apply workspaces even when the plan shows no changes (ignored for destroy) */
+  allowEmpty?: boolean | undefined
+}
+
+interface PlanWorkspaceOptions {
+  detailed?: boolean
+  savePlanFile?: boolean
+  allowEmpty?: boolean
 }
 
 export interface IPlanExecOptions {

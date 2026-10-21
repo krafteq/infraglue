@@ -296,6 +296,7 @@ ig apply --env dev                    # apply all workspaces in dev environment
 ig apply --env dev --project postgres # apply only the postgres workspace
 ig apply --env dev --no-deps          # apply without running dependencies
 ig apply --env dev --start-with-project postgres  # skip upstream levels, use cached outputs
+ig apply --env dev --allow-empty      # apply workspaces even if their plan shows no changes
 ig destroy --env staging              # destroy all workspaces
 
 # GitLab CI (bridge-less mode)
@@ -367,6 +368,14 @@ When the InfraGlue Bridge triggers a pipeline, it sets `IG_ACTION=apply` and `IG
 | `IG_APPROVED_LEVEL` | Level number approved via MR emoji reaction |
 | `IG_PLAN_ID`        | Plan ID for correlation                     |
 | `IG_MR_IID`         | Merge request IID for correlation           |
+
+**`--allow-empty`** (for `ig apply` only):
+
+By default `ig apply` skips a workspace whose plan has no resource or output changes. `--allow-empty` applies it anyway (runs `pulumi up` / `terraform apply` on the empty plan). Use it when a program has effects the plan cannot show — e.g. a Pulumi program that writes facts/config to Vault as a side effect rather than through a tracked resource. Prefer modelling such effects as real resources so `ig plan` detects them; `--allow-empty` is the escape hatch. Pre-approved levels (`--approve`) already skip the plan and always apply, so the flag only changes behavior for levels that go through the plan + confirmation step.
+
+```bash
+ig apply --env dev --project facts --allow-empty   # force-apply one workspace with no planned changes
+```
 
 **`--start-with-project <name>`** (for `ig apply`, `ig destroy`, `ig plan`):
 
@@ -539,19 +548,20 @@ When `ig plan` or `ig apply` detects no resource changes in a workspace, it comp
 
 ## Troubleshooting
 
-| Error                                    | Cause                                                   | Fix                                                                                                                            |
-| ---------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `Monorepo not found in <dir>`            | No `ig.yaml` with `workspace` field found               | Ensure root `ig.yaml` exists with `workspace` globs                                                                            |
-| `No environment selected`                | No env stored and no `--env` flag                       | Run `ig env select <env>` or pass `--env`                                                                                      |
-| `Single workspace is required`           | `provider` command run from monorepo root               | `cd` into a workspace dir or pass `--project`                                                                                  |
-| Workspace not discovered                 | Directory doesn't match any `workspace` glob            | Check glob patterns in root `ig.yaml`                                                                                          |
-| Provider not detected                    | No `.tf` or `Pulumi.yaml` files in workspace            | Add IaC files or set `provider` explicitly in workspace `ig.yaml`                                                              |
-| `Environment variable 'X' is not set`    | `${X}` used in config but `X` is not in env             | Set the env var or use `$${X}` to escape as literal                                                                            |
-| Provider state locked after failed apply | A previous `ig apply` or `ig destroy` failed mid-run    | Run `ig provider force-unlock <lock-id>` in each failed workspace, or `pulumi cancel` for Pulumi                               |
-| Destroy fails with missing upstream      | Upstream workspace already destroyed in a prior run     | ig `>=0.3.0` handles this automatically with placeholder inputs. On older versions, re-apply upstream first or use `--no-deps` |
-| Corrupted state / lost outputs           | Multiple `ig` processes ran concurrently                | Never run ig commands in parallel — ig uses a process-local mutex on `.ig/state.json`. Wait for each command to finish         |
-| `Vault authentication failed: no token`  | No `VAULT_TOKEN`, `~/.vault-token`, or `VAULT_ID_TOKEN` | Run `vault login` locally, or set `VAULT_TOKEN` / `VAULT_ID_TOKEN` in CI                                                       |
-| `Vault access denied for path '...'`     | Token lacks permission for the secret path              | Check Vault policies for the token/role                                                                                        |
-| `Vault secret not found at '...'`        | Secret path doesn't exist or wrong KV v2 path           | Ensure the path includes `secret/data/` prefix (KV v2). Verify with `vault kv get <path>`                                      |
-| `no vault configuration provided`        | `${vault:...}` used but no Vault address configured     | Set `VAULT_ADDR` env var or add `vault.address` to root ig.yaml                                                                |
-| `Vault JWT auth requires a role`         | JWT auth attempted without a role                       | Set `vault.role` in ig.yaml or `VAULT_ROLE` env var                                                                            |
+| Error                                                                     | Cause                                                                                            | Fix                                                                                                                            |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `Monorepo not found in <dir>`                                             | No `ig.yaml` with `workspace` field found                                                        | Ensure root `ig.yaml` exists with `workspace` globs                                                                            |
+| `ig apply` says up to date but side effects (e.g. Vault writes) are stale | The program's effect isn't a tracked resource, so the plan is empty and the workspace is skipped | Run `ig apply --allow-empty` (optionally with `--project`), or model the effect as a resource                                  |
+| `No environment selected`                                                 | No env stored and no `--env` flag                                                                | Run `ig env select <env>` or pass `--env`                                                                                      |
+| `Single workspace is required`                                            | `provider` command run from monorepo root                                                        | `cd` into a workspace dir or pass `--project`                                                                                  |
+| Workspace not discovered                                                  | Directory doesn't match any `workspace` glob                                                     | Check glob patterns in root `ig.yaml`                                                                                          |
+| Provider not detected                                                     | No `.tf` or `Pulumi.yaml` files in workspace                                                     | Add IaC files or set `provider` explicitly in workspace `ig.yaml`                                                              |
+| `Environment variable 'X' is not set`                                     | `${X}` used in config but `X` is not in env                                                      | Set the env var or use `$${X}` to escape as literal                                                                            |
+| Provider state locked after failed apply                                  | A previous `ig apply` or `ig destroy` failed mid-run                                             | Run `ig provider force-unlock <lock-id>` in each failed workspace, or `pulumi cancel` for Pulumi                               |
+| Destroy fails with missing upstream                                       | Upstream workspace already destroyed in a prior run                                              | ig `>=0.3.0` handles this automatically with placeholder inputs. On older versions, re-apply upstream first or use `--no-deps` |
+| Corrupted state / lost outputs                                            | Multiple `ig` processes ran concurrently                                                         | Never run ig commands in parallel — ig uses a process-local mutex on `.ig/state.json`. Wait for each command to finish         |
+| `Vault authentication failed: no token`                                   | No `VAULT_TOKEN`, `~/.vault-token`, or `VAULT_ID_TOKEN`                                          | Run `vault login` locally, or set `VAULT_TOKEN` / `VAULT_ID_TOKEN` in CI                                                       |
+| `Vault access denied for path '...'`                                      | Token lacks permission for the secret path                                                       | Check Vault policies for the token/role                                                                                        |
+| `Vault secret not found at '...'`                                         | Secret path doesn't exist or wrong KV v2 path                                                    | Ensure the path includes `secret/data/` prefix (KV v2). Verify with `vault kv get <path>`                                      |
+| `no vault configuration provided`                                         | `${vault:...}` used but no Vault address configured                                              | Set `VAULT_ADDR` env var or add `vault.address` to root ig.yaml                                                                |
+| `Vault JWT auth requires a role`                                          | JWT auth attempted without a role                                                                | Set `vault.role` in ig.yaml or `VAULT_ROLE` env var                                                                            |

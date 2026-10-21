@@ -94,6 +94,7 @@ interface IApplyOptions {
   project?: string
   startWithProject?: string
   upToLevel?: number
+  allowEmpty?: boolean
 }
 
 const execCommands = [
@@ -170,8 +171,14 @@ program
   )
 
 for (const execCmd of execCommands) {
-  program
-    .command(execCmd.name)
+  const command = program.command(execCmd.name)
+  if (!execCmd.isDestroy) {
+    command.option(
+      '--allow-empty',
+      'Apply workspaces even when the plan shows no changes (e.g. side effects the provider cannot preview)',
+    )
+  }
+  command
     .description(execCmd.desc)
     .option('-f, --format <format>', 'Select formatter for the plan', 'default')
     .option('-i, --integration <integration>', 'Integration to use', 'cli')
@@ -213,6 +220,7 @@ for (const execCmd of execCommands) {
         deps,
         startWithProject,
         upToLevel,
+        allowEmpty,
       }: IApplyOptions & { deps: boolean }) => {
         const monorepo = requireMonorepo()
 
@@ -247,6 +255,7 @@ for (const execCmd of execCommands) {
           formatter: getFormatter(format),
           preview: false,
           upToLevel,
+          allowEmpty: allowEmpty ?? false,
         })
       },
     )
